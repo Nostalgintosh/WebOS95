@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "MiniOS 95",
+  "version": "1.0.0",
+  "description": "A Windows 95 style desktop as your new tab page: folders of links, draggable windows, and a PowerShell / Bash / Zsh terminal.",
+  "chrome_url_overrides": {
+    "newtab": "index.html"
+  },
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "optional_permissions": [
+    "bookmarks"
+  ],
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtpUYronGAJz/g8GNkiedZhhbUD3v8rXoxtIYgmSBxk00IqG5ralNdcAFMKrpmHZm2ULMmgH5e0CaHWUrWUF2BM+Mp1w01J+3OA36NiY+3ArjvkiB733QQJvHivuZJ3BShijvzdBELDCK8eY9kBzS78kHQMYhoyOHJ0NEbO+EXy97YiATbDj4Q5IFSAGDCjIjmEzCQRw6ekIoCm+wwsTVVBj/FtZzNw0LOMp6S613dphkQJvB5TskAPpr0Mz32RRJGAQbfUQpgTF8ucVhlNqUdFFF/Y3CxKOEece9dqafmtK9Y72Gth2jr6QQwnhDJhUFRYXBSN/Jkpr6NZAKQGDpsQIDAQAB"
+}
