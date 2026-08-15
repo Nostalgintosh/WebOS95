@@ -344,7 +344,10 @@ function makeWindow(opts: any): any {
   bMin.onclick = e => { e.stopPropagation(); w.minimize(); };
   bMax.onclick = e => { e.stopPropagation(); w.toggleMax(); };
   bCls.onclick = e => { e.stopPropagation(); w.close(); };
-  tbar.addEventListener("dblclick", e => { if((e.target as HTMLElement).tagName !== "BUTTON") w.toggleMax(); });
+  tbar.addEventListener("dblclick", e => {
+    if((e.target as HTMLElement).closest("button") || performance.now() < (w.suppressTitlebarDoubleClickUntil || 0)) return;
+    w.toggleMax();
+  });
 
   node.addEventListener("pointerdown", () => focusWin(w), true);
   dragify(tbar, node, w);
@@ -355,6 +358,11 @@ function makeWindow(opts: any): any {
 }
 
 function focusWin(w: any){
+  const changed = active !== w || w.min;
+  if(!changed){
+    if(w.onFocus) w.onFocus();
+    return;
+  }
   wins.forEach(x => x.node.classList.add("blur"));
   w.node.classList.remove("blur");
   w.node.style.zIndex = String(++zTop);
@@ -364,65 +372,138 @@ function focusWin(w: any){
 }
 let active: any = null;
 
+interface PointerDragOptions {
+  threshold?: number;
+  onStart?: () => void;
+  onMove: (dx: number, dy: number) => void;
+  onEnd: (result: { dx: number; dy: number; moved: boolean; cancelled: boolean }) => void;
+}
+
+/** Tracks one primary-pointer gesture and batches visual work to animation frames. */
+function trackPointerDrag(event: PointerEvent, captureNode: HTMLElement, options: PointerDragOptions): boolean {
+  if(!event.isPrimary || event.button !== 0) return false;
+
+  event.preventDefault();
+  const pointerId = event.pointerId;
+  const startX = event.clientX, startY = event.clientY;
+  const threshold = Math.max(0, options.threshold ?? 3);
+  let dx = 0, dy = 0, frame = 0, activeGesture = true;
+  let moved = threshold === 0;
+
+  const render = () => {
+    frame = 0;
+    if(activeGesture && moved) options.onMove(dx, dy);
+  };
+  const move = (nextEvent: PointerEvent) => {
+    if(nextEvent.pointerId !== pointerId || !activeGesture) return;
+    const coalesced = nextEvent.getCoalescedEvents?.();
+    const sample = coalesced?.length ? coalesced[coalesced.length - 1] : nextEvent;
+    const nextDx = sample.clientX - startX, nextDy = sample.clientY - startY;
+    if(!moved){
+      if(nextDx * nextDx + nextDy * nextDy < threshold * threshold) return;
+      moved = true;
+      options.onStart?.();
+    }
+    dx = nextDx; dy = nextDy;
+    nextEvent.preventDefault();
+    if(!frame) frame = requestAnimationFrame(render);
+  };
+  const cleanup = () => {
+    captureNode.removeEventListener("lostpointercapture", lostCapture);
+    window.removeEventListener("pointermove", move, true);
+    window.removeEventListener("pointerup", end, true);
+    window.removeEventListener("pointercancel", cancel, true);
+    window.removeEventListener("mouseup", mouseEnd, true);
+  };
+  const finish = (cancelled: boolean) => {
+    if(!activeGesture) return;
+    if(frame){
+      cancelAnimationFrame(frame);
+      frame = 0;
+      if(moved && !cancelled) options.onMove(dx, dy);
+    }
+    activeGesture = false;
+    cleanup();
+    try{
+      if(captureNode.hasPointerCapture(pointerId)) captureNode.releasePointerCapture(pointerId);
+    }catch(e){ /* The pointer may already have been released by the browser. */ }
+    options.onEnd({ dx, dy, moved, cancelled });
+  };
+  const end = (nextEvent: PointerEvent) => {
+    if(nextEvent.pointerId === pointerId) finish(false);
+  };
+  const cancel = (nextEvent: PointerEvent) => {
+    if(nextEvent.pointerId === pointerId) finish(true);
+  };
+  const lostCapture = (nextEvent: PointerEvent) => {
+    if(nextEvent.pointerId === pointerId) finish(true);
+  };
+  const mouseEnd = (nextEvent: MouseEvent) => {
+    if(nextEvent.button === 0) finish(false);
+  };
+
+  captureNode.addEventListener("lostpointercapture", lostCapture);
+  window.addEventListener("pointermove", move, true);
+  window.addEventListener("pointerup", end, true);
+  window.addEventListener("pointercancel", cancel, true);
+  window.addEventListener("mouseup", mouseEnd, true);
+  try{ captureNode.setPointerCapture(pointerId); }
+  catch(e){ /* Page-level capture listeners still keep the gesture usable. */ }
+  if(moved) options.onStart?.();
+  return true;
+}
+
 function dragify(handle: HTMLElement, node: HTMLElement, w: any){
   handle.addEventListener("pointerdown", e => {
-    if((e.target as HTMLElement).tagName === "BUTTON" || w.max) return;
-    handle.setPointerCapture(e.pointerId);
-    const sx = e.clientX, sy = e.clientY;
+    if((e.target as HTMLElement).closest("button") || w.max) return;
     const ox = node.offsetLeft, oy = node.offsetTop;
     const ow = node.offsetWidth, dw = desktop.clientWidth, dh = desktop.clientHeight;
-    let dx = 0, dy = 0, frame = 0, finished = false;
-    node.classList.add("dragging");
-    const render = () => {
-      frame = 0;
-      node.style.transform = `translate3d(${dx}px,${dy}px,0)`;
-    };
-    const move = ev => {
-      dx = Math.min(Math.max(ev.clientX - sx, -ow + 60 - ox), dw - 40 - ox);
-      dy = Math.min(Math.max(ev.clientY - sy, -oy), dh - 24 - oy);
-      if(!frame) frame = requestAnimationFrame(render);
-    };
-    const up = () => {
-      if(finished) return;
-      finished = true;
-      if(frame) cancelAnimationFrame(frame);
-      node.style.transform = "";
-      node.style.left = ox + dx + "px"; node.style.top = oy + dy + "px";
-      node.classList.remove("dragging");
-      handle.removeEventListener("pointermove", move); handle.removeEventListener("pointerup", up); handle.removeEventListener("pointercancel", up);
-      window.removeEventListener("pointerup", up, true); window.removeEventListener("pointercancel", up, true);
-    };
-    handle.addEventListener("pointermove", move); handle.addEventListener("pointerup", up); handle.addEventListener("pointercancel", up);
-    window.addEventListener("pointerup", up, true); window.addEventListener("pointercancel", up, true);
+    let dx = 0, dy = 0;
+    trackPointerDrag(e, handle, {
+      onStart: () => node.classList.add("dragging"),
+      onMove: (rawDx, rawDy) => {
+        dx = Math.min(Math.max(rawDx, -ow + 60 - ox), dw - 40 - ox);
+        dy = Math.min(Math.max(rawDy, -oy), dh - 24 - oy);
+        node.style.transform = `translate3d(${dx}px,${dy}px,0)`;
+      },
+      onEnd: ({ moved, cancelled }) => {
+        node.style.transform = "";
+        node.classList.remove("dragging");
+        if(moved && !cancelled){
+          node.style.left = ox + dx + "px";
+          node.style.top = oy + dy + "px";
+          w.suppressTitlebarDoubleClickUntil = performance.now() + 300;
+        }
+      }
+    });
   });
 }
 function resizify(grip: HTMLElement, node: HTMLElement, w: any){
   grip.addEventListener("pointerdown", e => {
+    if(w.max) return;
     e.stopPropagation();
-    grip.setPointerCapture(e.pointerId);
-    const sx=e.clientX, sy=e.clientY, ow=node.offsetWidth, oh=node.offsetHeight;
-    let width = ow, height = oh, frame = 0, finished = false;
-    node.classList.add("resizing");
-    const render = () => {
-      frame = 0;
-      node.style.width = width + "px"; node.style.height = height + "px";
-      if(w.onResize) w.onResize();
-    };
-    const move = ev => {
-      width = Math.max(240, ow + ev.clientX - sx);
-      height = Math.max(140, oh + ev.clientY - sy);
-      if(!frame) frame = requestAnimationFrame(render);
-    };
-    const up = () => {
-      if(finished) return;
-      finished = true;
-      if(frame){ cancelAnimationFrame(frame); render(); }
-      node.classList.remove("resizing");
-      grip.removeEventListener("pointermove", move); grip.removeEventListener("pointerup", up); grip.removeEventListener("pointercancel", up);
-      window.removeEventListener("pointerup", up, true); window.removeEventListener("pointercancel", up, true);
-    };
-    grip.addEventListener("pointermove", move); grip.addEventListener("pointerup", up); grip.addEventListener("pointercancel", up);
-    window.addEventListener("pointerup", up, true); window.addEventListener("pointercancel", up, true);
+    const ow=node.offsetWidth, oh=node.offsetHeight;
+    const maxWidth = Math.max(220, desktop.clientWidth - node.offsetLeft);
+    const maxHeight = Math.max(120, desktop.clientHeight - node.offsetTop);
+    let width = ow, height = oh;
+    trackPointerDrag(e, grip, {
+      threshold: 0,
+      onStart: () => node.classList.add("resizing"),
+      onMove: (dx, dy) => {
+        width = Math.min(maxWidth, Math.max(Math.min(240, maxWidth), ow + dx));
+        height = Math.min(maxHeight, Math.max(Math.min(140, maxHeight), oh + dy));
+        node.style.width = width + "px"; node.style.height = height + "px";
+        if(w.onResize) w.onResize();
+      },
+      onEnd: ({ cancelled }) => {
+        if(cancelled){
+          node.style.width = ow + "px";
+          node.style.height = oh + "px";
+          if(w.onResize) w.onResize();
+        }
+        node.classList.remove("resizing");
+      }
+    });
   });
 }
 
@@ -649,6 +730,16 @@ function freeSlots(count){
   while(out.length < count) out.push({ x:pad, y:pad });
   return out;
 }
+
+function clampDesktopPoint(x: number, y: number, width: number, height: number){
+  const safeX = Number.isFinite(x) ? Math.round(x) : 0;
+  const safeY = Number.isFinite(y) ? Math.round(y) : 0;
+  return {
+    x: Math.max(0, Math.min(safeX, Math.max(0, desktop.clientWidth - width))),
+    y: Math.max(0, Math.min(safeY, Math.max(0, desktop.clientHeight - height)))
+  };
+}
+
 function renderIcons(){
   const box = $("#icons"); box.innerHTML = "";
   const entries = [];
@@ -657,55 +748,69 @@ function renderIcons(){
 
   const auto = freeSlots(entries.filter(e => !state.iconPos[e.key]).length);
   let ai = 0;
+  let positionsChanged = false;
   entries.forEach(e => {
     const d = el("div","icon");
     const pos = state.iconPos[e.key] || auto[ai++];
-    d.style.left = pos.x + "px"; d.style.top = pos.y + "px";
     const img = el("img","glyph"); img.src = e.icon; img.alt = "";
     d.append(img, el("div","label", e.name));
     d.tabIndex = 0;
+    d.setAttribute("role", "button");
+    d.setAttribute("aria-label", e.name);
+    box.appendChild(d);
 
-    const open = () => e.sys ? e.sys.action() : openNode(e.node);
+    const initial = clampDesktopPoint(pos.x, pos.y, d.offsetWidth, d.offsetHeight);
+    d.style.left = initial.x + "px"; d.style.top = initial.y + "px";
+    if(state.iconPos[e.key] && (initial.x !== pos.x || initial.y !== pos.y)){
+      state.iconPos[e.key] = initial;
+      positionsChanged = true;
+    }
+
+    let suppressOpenUntil = 0;
+    const open = () => {
+      if(performance.now() < suppressOpenUntil) return;
+      e.sys ? e.sys.action() : openNode(e.node);
+    };
     d.addEventListener("dblclick", open);
     d.addEventListener("keydown", ev => { if(ev.key === "Enter") open(); });
     d.addEventListener("pointerdown", ev => {
       document.querySelectorAll("#icons .icon.sel").forEach(x => x.classList.remove("sel"));
       d.classList.add("sel"); d.focus();
-      // drag
-      const sx = ev.clientX, sy = ev.clientY, ox = d.offsetLeft, oy = d.offsetTop;
-      let moved = false, dx = 0, dy = 0, frame = 0, finished = false;
-      d.setPointerCapture(ev.pointerId);
-      const render = () => { frame = 0; d.style.transform = `translate3d(${dx}px,${dy}px,0)`; };
-      const mv = m => {
-        if(Math.abs(m.clientX-sx) + Math.abs(m.clientY-sy) < 4) return;
-        moved = true;
-        d.classList.add("dragging");
-        dx = Math.max(-ox, Math.min(m.clientX - sx, desktop.clientWidth - 78 - ox));
-        dy = Math.max(-oy, Math.min(m.clientY - sy, desktop.clientHeight - 70 - oy));
-        if(!frame) frame = requestAnimationFrame(render);
-      };
-      const up = () => {
-        if(finished) return;
-        finished = true;
-        if(frame) cancelAnimationFrame(frame);
-        d.style.transform = ""; d.classList.remove("dragging");
-        d.removeEventListener("pointermove", mv); d.removeEventListener("pointerup", up); d.removeEventListener("pointercancel", up);
-        window.removeEventListener("pointerup", up, true); window.removeEventListener("pointercancel", up, true);
-        if(moved){
-          d.style.left = ox + dx + "px"; d.style.top = oy + dy + "px";
-          state.iconPos[e.key] = { x:ox + dx, y:oy + dy }; save();
+      const ox = d.offsetLeft, oy = d.offsetTop;
+      const iconWidth = d.offsetWidth, iconHeight = d.offsetHeight;
+      const desktopWidth = desktop.clientWidth, desktopHeight = desktop.clientHeight;
+      let dx = 0, dy = 0;
+      trackPointerDrag(ev, d, {
+        onStart: () => {
+          d.classList.add("dragging");
+          d.setAttribute("aria-grabbed", "true");
+        },
+        onMove: (rawDx, rawDy) => {
+          dx = Math.max(-ox, Math.min(rawDx, desktopWidth - iconWidth - ox));
+          dy = Math.max(-oy, Math.min(rawDy, desktopHeight - iconHeight - oy));
+          d.style.transform = `translate3d(${dx}px,${dy}px,0)`;
+        },
+        onEnd: ({ moved, cancelled }) => {
+          d.style.transform = "";
+          d.classList.remove("dragging");
+          d.removeAttribute("aria-grabbed");
+          if(moved) suppressOpenUntil = performance.now() + 350;
+          if(moved && !cancelled){
+            const finalPos = { x:ox + dx, y:oy + dy };
+            d.style.left = finalPos.x + "px"; d.style.top = finalPos.y + "px";
+            state.iconPos[e.key] = finalPos;
+            save();
+          }
         }
-      };
-      d.addEventListener("pointermove", mv); d.addEventListener("pointerup", up); d.addEventListener("pointercancel", up);
-      window.addEventListener("pointerup", up, true); window.addEventListener("pointercancel", up, true);
+      });
     });
     d.addEventListener("contextmenu", ev => {
       ev.preventDefault(); ev.stopPropagation();
       if(e.node) nodeMenu(e.node, ev.clientX, ev.clientY);
       else menu(ev.clientX, ev.clientY, [{ label:"Open", action:()=>e.sys.action() }]);
     });
-    box.appendChild(d);
   });
+  if(positionsChanged) save();
 }
 desktop.addEventListener("contextmenu", e => {
   const target = e.target as HTMLElement;
