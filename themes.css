@@ -1,0 +1,192 @@
+/* Shared additions for the typed multi-desktop shell. The existing rules in
+   index.html remain the Windows 95 baseline; this file contains component
+   states and the Mac OS 9 personality. */
+
+.os-choices{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:8px;
+  margin:5px 0 7px;
+}
+.os-choice{
+  display:grid!important;
+  grid-template-columns:auto 42px 1fr;
+  align-items:center;
+  gap:7px!important;
+  min-width:0;
+  padding:7px;
+  border:2px solid;
+  border-color:var(--white) var(--face-dark) var(--face-dark) var(--white);
+  background:var(--face-light);
+}
+.os-choice:has(input:checked){outline:1px dotted var(--black);outline-offset:-5px;background:var(--white)}
+.os-choice img{width:40px;height:40px;object-fit:contain;image-rendering:auto}
+.os-choice span{display:flex;min-width:0;flex-direction:column;gap:2px}
+.os-choice small{color:#444;line-height:1.2}
+.win.dragging,.win.resizing,.icon.dragging{will-change:transform;transition:none!important}
+.boot-error{max-width:580px;margin:12vh auto;padding:24px;background:#fff;color:#111;font:16px/1.5 system-ui,sans-serif;border:2px solid #900}
+.boot-error h1{margin-top:0}
+
+/* Mac OS 9 — Platinum appearance */
+html[data-os="macos9"]{
+  --face:#dedede;
+  --face-dark:#777;
+  --face-light:#f6f6f6;
+  --white:#fff;
+  --black:#111;
+  --navy:#4b5873;
+  --navy-2:#7887a6;
+  --sel:#526b99;
+  --font:Charcoal,Chicago,"Geneva 9",Geneva,Verdana,sans-serif;
+}
+html[data-os="macos9"] body{font-size:12px}
+html[data-os="macos9"] #desktop{inset:28px 0 0;}
+html[data-os="macos9"] #taskbar{
+  top:0;
+  bottom:auto;
+  height:28px;
+  padding:2px 5px;
+  gap:5px;
+  background:
+    linear-gradient(#fafafa,#d8d8d8 48%,#c4c4c4 52%,#ededed);
+  border:0;
+  border-bottom:1px solid #111;
+  box-shadow:0 1px 0 rgba(255,255,255,.75) inset,0 2px 7px rgba(0,0,0,.22);
+}
+html[data-os="macos9"] #start{
+  min-width:34px;
+  width:34px;
+  height:23px;
+  padding:1px 5px;
+  border:1px solid transparent;
+  box-shadow:none;
+  background:transparent;
+}
+html[data-os="macos9"] #start:hover,
+html[data-os="macos9"] #start.pressed{border-color:#555;background:#b9c8df;padding:1px 5px}
+html[data-os="macos9"] #start img{width:22px;height:22px;object-fit:contain;image-rendering:auto}
+html[data-os="macos9"] #start span{display:none}
+html[data-os="macos9"] #tasks{gap:2px}
+html[data-os="macos9"] #tasks .task{
+  min-width:72px;
+  max-width:180px;
+  height:22px;
+  padding:1px 7px;
+  border:1px solid #777;
+  border-radius:3px;
+  box-shadow:inset 1px 1px #fff;
+  background:#e7e7e7;
+}
+html[data-os="macos9"] #tasks .task:active,
+html[data-os="macos9"] #tasks .task.pressed{padding:1px 7px;background:#b6c4db;box-shadow:inset 1px 1px #777}
+html[data-os="macos9"] #tasks .task img{image-rendering:auto}
+html[data-os="macos9"] #tray{
+  height:22px;
+  padding:1px 5px;
+  border:1px solid #888;
+  border-radius:3px;
+  box-shadow:inset 1px 1px #fff;
+  background:#e7e7e7;
+}
+
+html[data-os="macos9"] .out{
+  border:1px solid #111;
+  border-radius:3px;
+  box-shadow:inset 1px 1px 0 #fff,inset -1px -1px 0 #999;
+}
+html[data-os="macos9"] .in,
+html[data-os="macos9"] .thin-in{
+  border:1px solid #777;
+  border-radius:2px;
+  box-shadow:inset 1px 1px 1px rgba(0,0,0,.22),1px 1px 0 #fff;
+}
+html[data-os="macos9"] button{
+  min-height:20px;
+  border:1px solid #555;
+  border-radius:3px;
+  box-shadow:inset 1px 1px 0 #fff,inset -1px -1px 0 #999;
+  background:linear-gradient(#f8f8f8,#d0d0d0);
+  padding:2px 10px;
+}
+html[data-os="macos9"] button:active:not(:disabled),
+html[data-os="macos9"] button.pressed{padding:2px 10px;background:#b4c2d8;box-shadow:inset 1px 1px 1px #777}
+
+html[data-os="macos9"] .win{
+  padding:2px;
+  border:1px solid #111;
+  border-radius:4px;
+  box-shadow:0 5px 14px rgba(0,0,0,.3),inset 1px 1px #fff,inset -1px -1px #888;
+  background:var(--face);
+}
+html[data-os="macos9"] .tbar{
+  position:relative;
+  min-height:20px;
+  padding:2px 30px;
+  justify-content:center;
+  color:#111;
+  border:0;
+  background:repeating-linear-gradient(180deg,#aaa 0,#aaa 1px,#eee 1px,#eee 3px);
+  text-shadow:none;
+}
+html[data-os="macos9"] .win.blur .tbar{color:#666;background:#d8d8d8}
+html[data-os="macos9"] .tbar .ti{display:none}
+html[data-os="macos9"] .tbar .tt{
+  flex:0 1 auto;
+  max-width:calc(100% - 70px);
+  padding:0 7px;
+  text-align:center;
+  background:var(--face);
+  font-weight:bold;
+}
+html[data-os="macos9"] .tbar .btns{position:static;display:contents}
+html[data-os="macos9"] .tbar .btns button{
+  position:absolute;
+  top:3px;
+  width:14px;
+  min-width:14px;
+  height:14px;
+  min-height:14px;
+  padding:0;
+  overflow:hidden;
+  color:transparent;
+  border:1px solid #333;
+  border-radius:1px;
+  background:var(--face);
+  box-shadow:inset 1px 1px #fff,inset -1px -1px #777;
+}
+html[data-os="macos9"] .tbar .btns button:active{padding:0;background:#aaa}
+html[data-os="macos9"] .tbar .btns button:nth-child(1){right:20px}
+html[data-os="macos9"] .tbar .btns button:nth-child(2){right:3px}
+html[data-os="macos9"] .tbar .btns button:last-child{left:3px;right:auto}
+html[data-os="macos9"] .wbody{margin-top:2px}
+html[data-os="macos9"] .menubar span:hover{background:var(--sel)}
+html[data-os="macos9"] .status div{border:1px solid #999;box-shadow:inset 1px 1px #fff}
+
+html[data-os="macos9"] #startmenu{
+  top:27px;
+  bottom:auto;
+  left:3px;
+  min-width:210px;
+  border-radius:0 0 4px 4px;
+  box-shadow:2px 4px 9px rgba(0,0,0,.35);
+}
+html[data-os="macos9"] #startmenu .band{display:none}
+html[data-os="macos9"] .mi{padding:5px 18px 5px 8px}
+html[data-os="macos9"] .mi img{image-rendering:auto}
+html[data-os="macos9"] .submenu{border-radius:3px;box-shadow:2px 4px 9px rgba(0,0,0,.3)}
+html[data-os="macos9"] #ctx{border-radius:3px;box-shadow:2px 4px 9px rgba(0,0,0,.3)}
+html[data-os="macos9"] .icon .glyph,
+html[data-os="macos9"] .item .glyph{width:40px;height:40px;image-rendering:auto;object-fit:contain}
+html[data-os="macos9"] .icon{height:78px}
+html[data-os="macos9"] .icon .label{text-shadow:0 1px 2px rgba(0,0,0,.8)}
+html[data-os="macos9"] #today,
+html[data-os="macos9"] #omni{box-shadow:0 5px 14px rgba(0,0,0,.25),inset 1px 1px #fff}
+html[data-os="macos9"] #today .today-title,
+html[data-os="macos9"] #omni .omni-title{color:#111;background:repeating-linear-gradient(180deg,#aaa 0,#aaa 1px,#eee 1px,#eee 3px);text-shadow:none}
+html[data-os="macos9"] #shutdown{background:#c8c8c8;color:#111;font-family:var(--font);text-shadow:1px 1px #fff}
+html[data-os="macos9"] ::-webkit-scrollbar-thumb{border:1px solid #666;border-radius:2px;box-shadow:inset 1px 1px #fff;background:#d8d8d8}
+
+@media (max-width:720px){
+  .os-choices{grid-template-columns:1fr}
+  html[data-os="macos9"] #omni{bottom:8px}
+}

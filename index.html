@@ -1,15 +1,15 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-os="win95">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MiniOS 95 — A nicer place to start</title>
-<link rel="icon" href="icons/32.png" sizes="32x32">
+<title>MiniOS — Classic desktops</title>
+<link rel="icon" href="icons/win-icon/32.png" sizes="32x32">
 <link rel="icon" href="Windows_Logo_(1992-2001).svg" type="image/svg+xml">
 <style>
 /* ============================================================
    Web95 — a Windows 95 flavoured home page / web desktop
-   Everything is local. State lives in localStorage.
+   Everything is local. State uses extension storage with a loose-file fallback.
    ============================================================ */
 :root{
   --face:#c0c0c0;
@@ -443,6 +443,7 @@ body.crt-on #desktop,body.crt-on #taskbar{filter:saturate(1.04) contrast(1.025)}
   #crt-overlay::before{animation:none}
 }
 </style>
+<link rel="stylesheet" href="themes.css">
 </head>
 <body>
 
@@ -523,7 +524,7 @@ body.crt-on #desktop,body.crt-on #taskbar{filter:saturate(1.04) contrast(1.025)}
 
 <div id="modalwrap"><div id="modal" class="win"></div></div>
 
-<div id="shutdown"><div>It&rsquo;s now safe to turn off<br>your computer.<div style="font-size:12px;color:#888;margin-top:24px">(click anywhere to come back)</div></div></div>
+<div id="shutdown"><div><span id="shutdown-message">It&rsquo;s now safe to turn off your computer.</span><div id="shutdown-hint" style="font-size:12px;color:#888;margin-top:24px">(click anywhere to come back)</div></div></div>
 
 <div id="crt-overlay" aria-hidden="true"></div>
 

@@ -1,134 +1,51 @@
-# MiniOS 95 — install as your new tab page
+# MiniOS Classic — install as your new tab page
 
-This folder is both a standalone page (`index.html`) and a loadable browser extension
-(`manifest.json`). Loading it as an extension is the only way a page can replace the
-**new tab** — browser settings alone cannot do it.
+This folder works both as a standalone page (`index.html`) and as a Chromium extension (`manifest.json`). The extension is required to replace the browser's new-tab page.
 
-You can move this folder later without losing anything: `manifest.json` contains a `key`,
-which pins the extension's identity (and therefore its storage) to that key instead of to
-the folder path. Just don't put it in OneDrive, and re-point *Load unpacked* at the new
-location if you move it.
+The pinned extension ID remains `mhlkhodjmoldkdihbefnfbaofoeggemc`, so rebuilding or moving this folder does not create a new storage identity.
 
-Pinned extension ID: `mhlkhodjmoldkdihbefnfbaofoeggemc`
-Page address once loaded: `chrome-extension://mhlkhodjmoldkdihbefnfbaofoeggemc/index.html`
+## Load the extension
 
-The matching private key is `C:\Users\MATTHEWCOTO\minios95-extension-key.pem`, kept
-outside this folder on purpose so it never ships inside the extension. You only need it if
-you ever pack a `.crx` and want the same ID; nothing here uses it.
+1. Open `edge://extensions`, `chrome://extensions`, or `brave://extensions`.
+2. Enable **Developer mode**.
+3. Select **Load unpacked** and choose `C:\Users\MATTHEWCOTO\WebOS95`.
+4. Open a new tab.
 
-## Load it (Edge, Chrome and Brave are all the same three clicks)
+After editing the TypeScript or CSS, run `npm run build`, then select **Reload** on the extension card.
 
-1. Open the extensions page:
-   - Edge: `edge://extensions`
-   - Chrome: `chrome://extensions`
-   - Brave: `brave://extensions`
-2. Turn on **Developer mode** (Edge: bottom-left toggle. Chrome/Brave: top-right toggle).
-3. Click **Load unpacked** and select the folder `C:\Users\MATTHEWCOTO\WebOS95`.
+## Switch desktops
 
-Open a new tab. That's it.
+Open **Settings** in MiniOS 95 or **Control Panels** in MiniOS 9, then choose a desktop style:
 
-Repeat in each browser you want it in — each browser keeps its own copy of your
-folders and settings.
+- Windows 95
+- Mac OS 9
 
-Two things that are browser behaviour, not bugs:
+The same data is used in both modes. The terminal can also switch the desktop with `theme win95` or `theme macos9`.
 
-- A new tab opens with the cursor in the **address bar**, so typing goes there, not into
-  MiniOS. Click the desktop once first if you want the in-page search box or the keyboard
-  shortcuts. No page can take focus away from the omnibox.
-- **Incognito windows** always show the browser's own new tab page.
+## Local data and migration
 
-## Importing your existing bookmarks
+The installed extension stores folders, bookmarks, notes, editor content, icon positions, and settings in `chrome.storage.local`. It is asynchronous and local to the browser profile.
 
-Settings → **Import browser bookmarks…** asks the browser for permission (declared as an
-*optional* permission, so installing MiniOS 95 shows no warnings), then copies your whole
-bookmark tree into a folder called *Browser bookmarks*. Accept the prompt and it happens in
-one click; decline and it falls back to pasting an exported `bookmarks.html`. The terminal
-has both paths too: `import-browser` and `import-html`.
+On the first upgraded launch, MiniOS automatically migrates the original `web95.state.v1` value from `localStorage`. Opening `index.html` directly continues to use the loose-file fallback.
 
-## Also use it for the Home button and on startup
+Data survives browser restarts, extension updates, and moving this folder because the extension identity is pinned. Removing the extension also removes its extension storage.
 
-Paste this into the settings below:
+Before uninstalling, use **Settings / Control Panels → Export** and keep the JSON somewhere outside this folder. Use **Import** to restore it or copy it to another browser.
 
-```
-chrome-extension://mhlkhodjmoldkdihbefnfbaofoeggemc/index.html
-```
+## Import browser bookmarks
 
-- **Edge:** Settings → Start, home, and new tabs → *Open these pages* / *Home button*
-- **Chrome / Brave:** Settings → On startup → *Open a specific page*, and
-  Appearance → Show home button
+**Import browser bookmarks…** requests the optional bookmarks permission and copies the browser bookmark tree into MiniOS. Declining the prompt falls back to pasting an exported `bookmarks.html` file.
 
-## Backups
+## Browser behavior
 
-Your folders, bookmarks, notes and settings live in the browser's local storage for the
-extension's address. They survive browser restarts, browser updates, and moving the folder
-(thanks to the pinned `key`). They are **erased if you remove the extension**, and they are
-per-browser — Edge, Chrome and Brave each keep their own.
+- New tabs begin with focus in the browser address bar. Click the desktop before using MiniOS keyboard shortcuts.
+- Incognito windows use the browser's own new-tab page.
+- Extension pages cannot navigate directly to most `chrome://`, `edge://`, or other protected addresses.
+- Local `file:///` shortcuts require **Allow access to file URLs** on the extension details page.
 
-So before uninstalling: open **Settings → Export**, copy the JSON, keep it somewhere.
-**Settings → Import** puts it back — also how you copy your setup between browsers.
+## Troubleshooting
 
-If you already built folders in the loose-file version, they are stored under the
-`file:///` address and will **not** appear in the extension. Open the file once more,
-Export there, then Import here.
-
-## If it does not work
-
-- **No Developer mode toggle, or *Load unpacked* is missing/greyed out** — a work
-  policy is blocking it. Check `edge://policy` (or `chrome://policy`) for
-  `ExtensionInstallBlocklist`, `ExtensionSettings`, `BlockExternalExtensions`, or
-  `ExtensionDeveloperModeSettings`.
-- **New tab still shows the browser's own page** — check `edge://policy` for
-  `NewTabPageLocation`. A managed new tab page overrides extensions.
-- **"Disable developer mode extensions" bubble on startup** — dismiss it; choosing
-  *Disable* turns MiniOS 95 off, and you re-enable it on the extensions page.
-- **Blank page** — make sure `index.html`, `web95.js`, `manifest.json` and `icons/`
-  are all still in the folder, then click *Reload* on the extensions page. If you ever
-  edit `index.html`, keep the script in `web95.js`: extension pages refuse to run inline
-  `<script>` blocks, and an inline script is the usual cause of a blank override page.
-- **A `file:///` or `chrome://` bookmark won't open** — extension pages are not allowed to
-  navigate there. MiniOS now says so and shows the address to paste. For local files only,
-  the extension's details page has *Allow access to file URLs*, which makes them work.
-
-## Files
-
-| File | What it is |
-|---|---|
-| `index.html` | The page: markup and all the Windows 95 styling |
-| `web95.js` | Everything else: window manager, folders, terminal, settings |
-| `manifest.json` | Makes the folder a browser extension that overrides the new tab |
-| `icons/*.png` | Extension icons (the wavy flag, for the browser's own UI) |
-| `assets/*.ico` | The real Windows 95 shell icons used inside the desktop |
-| `Windows_Logo_(1992-2001).svg` | The flag artwork, used as the default wallpaper |
-| `win95-winxp_icons-master/` | The original icon pack — **safe to delete**, see below |
-
-## Icons and wallpaper
-
-The desktop uses genuine Win95 shell icons, copied out of your pack into `assets/`:
-
-| Slot | From the pack |
-|---|---|
-| folder / open folder | `w95_4` / `w95_5` |
-| internet shortcut | `w95_14` (globe) |
-| My Computer | `w95_16` |
-| Notepad | `w95_60` |
-| Settings | `w95_61` |
-| Read Me | `w95_24` |
-| Find | `w95_23` |
-| Up one level | `w95_31` |
-| Run… | `w95_3` |
-| Start button | `w95_40` (the pixel flag) |
-| Recycle Bin | `w95_32` |
-
-The three terminal icons stay hand-drawn on purpose: they are tinted per shell —
-PowerShell blue, Bash black, Zsh charcoal — which one shared MS-DOS icon cannot show.
-The dialog warning triangle and the shutdown glyph are also drawn, as the pack has no
-matching Win95-era equivalents.
-
-Only `assets/` is used at runtime, so the 8.6 MB `win95-winxp_icons-master/` folder can be
-deleted once you are happy with the look. To swap an icon, replace the file in `assets/`
-keeping the same name, then open a new tab.
-
-**Wallpaper:** Settings → *Wallpaper* takes any image sitting next to `index.html` (or a
-URL), with Fit / Centre / Tile / Stretch, a size slider, and a strength slider that fades it
-into the desktop colour. Default is the Windows flag at 45%. From a terminal:
-`wallpaper <file|none> [fit|center|tile|stretch] [10-100%]`.
+- **Blank page:** run `npm run build`, confirm `web95.js` exists, and reload the extension.
+- **New tab is unchanged:** check whether a managed `NewTabPageLocation` policy overrides extensions.
+- **Load unpacked is unavailable:** check the browser's enterprise policies for extension developer-mode restrictions.
+- **Existing loose-file data is missing:** export from the loose `file:///` page, then import into the installed extension; they have different storage origins.
