@@ -13,6 +13,15 @@ const AS_EXT = AS_EXTENSION;
    A relative path, so it resolves the same on chrome-extension:// and file://. */
 const LOGO = WINDOWS_LOGO;
 let WALLPAPER_PRESETS = themeFor("win95").wallpapers;
+const SOLID_WALLPAPER_PRESETS = [
+  { name:"Classic Teal", color:"#008080" },
+  { name:"Steel Blue", color:"#3a6ea5" },
+  { name:"Platinum", color:"#5f89b4" },
+  { name:"Lavender", color:"#7b78a8" },
+  { name:"Black", color:"#000000" },
+  { name:"Sage", color:"#7e9c7e" },
+  { name:"Sand", color:"#a08050" },
+] as const;
 
 /* ============================================================
    1. Icons — inline SVG, chunky on purpose
@@ -1094,31 +1103,43 @@ const COTO_PRODUCT_FAMILY="Coto Language · Coto Compiler · Coto Shell · OS/Co
 
 type CotoGuideTopic = {
   id:string;
+  category:"Start here"|"Syntax"|"Types"|"Functions"|"Formulas"|"Tools";
   title:string;
   summary:string;
   points:string[];
   code:string;
   commands:string[];
+  keywords?:string[];
   sample?:keyof typeof COTO_SAMPLES;
 };
 
 const COTO_GUIDE_TOPICS:CotoGuideTopic[] = [
   {
     id:"overview",
-    title:"Meet the Coto workflow",
-    summary:"Coto Language is the source, MiniEditor is the workbench, Coto Shell is the guide and command line, and the hosted compiler checks and runs the shared file.",
+    category:"Start here",
+    title:"Coto quick start",
+    summary:"A complete Coto program has a name, a procedure division, and a typed main function. Start here if you have never written Coto before.",
     points:[
-      "One .coto document is shared live between MiniEditor and every Coto Shell window.",
-      "Everything is saved in this browser, so the learning workspace works locally.",
-      "The MiniOS compiler is a safe learning subset inspired by the Coto v0 reference compiler.",
-      `The Coto product family is copyrighted by ${COTO_COMPANY}.`
+      "Statements inside main end with a semicolon.",
+      "Choose Coto as the language, then use Coto Check before Run in CS.",
+      "FIRE and HOLD are Coto's readable boolean values.",
+      "This library documents the safe Coto subset available in MiniOS."
     ],
-    code:'display("Hola from Coto!\\n");',
-    commands:["guide structure","edit","check","run"],
+    code:`IDENTIFICATION DIVISION.
+PROGRAM-ID. HELLO-COTO.
+
+PROCEDURE DIVISION.
+func int main() {
+  display("Hola from Coto!\\n");
+  return 0;
+}`,
+    commands:["coto sample hello","check","run"],
+    keywords:["beginner","hello world","first program","template"],
     sample:"hello"
   },
   {
     id:"structure",
+    category:"Syntax",
     title:"Program structure",
     summary:"A Coto program names itself, enters its procedure division, and starts execution in a typed main function.",
     points:[
@@ -1134,52 +1155,207 @@ func int main() {
   return 0;
 }`,
     commands:["coto sample hello","check","run"],
+    keywords:["identification division","program-id","procedure division","main","entry point","braces","semicolon"],
     sample:"hello"
   },
   {
-    id:"values",
-    title:"Values and FIRE / HOLD",
-    summary:"The hosted subset uses checked int values, strings, and Coto booleans: FIRE for true and HOLD for false.",
+    id:"comments",
+    category:"Syntax",
+    title:"Comments",
+    summary:"Use two slashes for a single-line note or slash-star for a block comment. Comments are ignored when Coto checks and runs the program.",
     points:[
-      "Declare values with an explicit type such as int, string, or bool.",
-      "FIRE and HOLD make boolean state read like an active signal.",
-      "Integer expressions are checked instead of silently overflowing."
+      "A // comment continues to the end of its line.",
+      "A /* block comment */ can span several lines.",
+      "Comments are useful for intent, assumptions, and short explanations."
+    ],
+    code:`// Explain one line.
+/* Explain a larger section
+   across several lines. */`,
+    commands:["check"],
+    keywords:["comment","notes","documentation","slash","block"]
+  },
+  {
+    id:"variables",
+    category:"Types",
+    title:"Variables and types",
+    summary:"Declare a value with an explicit type and a descriptive name. The hosted library supports int, string, and bool.",
+    points:[
+      "int stores checked whole numbers; string stores text; bool stores FIRE or HOLD.",
+      "Without an initializer, values start as 0, an empty string, or HOLD.",
+      "Names begin with a letter or underscore and can then include numbers."
     ],
     code:`int ideas = 3;
 string system = "MiniOS";
 bool ready = FIRE;
-bool waiting = HOLD;`,
-    commands:["coto sample kitchen","source","run"],
+int score;`,
+    commands:["check","run"],
+    keywords:["declare","declaration","int","integer","string","text","bool","variable","default value"]
+  },
+  {
+    id:"booleans",
+    category:"Types",
+    title:"FIRE and HOLD booleans",
+    summary:"Coto writes true as FIRE and false as HOLD, making yes/no state read like an active signal.",
+    points:[
+      "Use bool when a value has two states.",
+      "FIRE means the condition is true; HOLD means it is false.",
+      "Boolean formulas can use !, &&, and ||."
+    ],
+    code:`bool ready = FIRE;
+bool paused = HOLD;
+bool can_run = ready && !paused;`,
+    commands:["coto sample kitchen","check","run"],
+    keywords:["boolean","true","false","fire","hold","yes","no"],
     sample:"kitchen"
   },
   {
-    id:"output",
-    title:"Display and concatenate",
-    summary:"Use display(...) to write output and the double-dot operator to join strings, numbers, and booleans.",
+    id:"assignment",
+    category:"Syntax",
+    title:"Assign a new value",
+    summary:"Use one equals sign to replace a variable's value after it has been declared.",
     points:[
-      "The .. operator joins values into a single display expression.",
-      "Use \\n inside a string when you want a new output line.",
-      "Coto Shell shows program output directly below compiler diagnostics."
+      "The variable must already exist.",
+      "The new value must have the same type as the variable.",
+      "Use ==, not =, when you want to compare two values."
+    ],
+    code:`int score = 10;
+score = score + 5;
+
+bool ready = HOLD;
+ready = FIRE;`,
+    commands:["check","run"],
+    keywords:["assignment","set","update","change","equals"]
+  },
+  {
+    id:"display",
+    category:"Functions",
+    title:"display(value)",
+    summary:"display(...) writes a value to Coto Shell output. Join several values with the double-dot operator.",
+    points:[
+      "display accepts a string, int, bool, or a formula that produces one.",
+      "Use \\n inside a string to move output to the next line.",
+      "FIRE and HOLD keep their Coto spelling when displayed."
     ],
     code:'display("Ideas: " .. ideas .. "\\n");\ndisplay("Ready: " .. ready .. "\\n");',
     commands:["check","run","coto source"],
+    keywords:["print","write","output","console","newline","concat","function"],
     sample:"hello"
   },
   {
-    id:"priority",
-    title:"Priority events",
-    summary:"makefirst(...) previews Coto's priority-oriented event idea and records the event in the hosted VM manifest.",
+    id:"makefirst",
+    category:"Functions",
+    title:"makefirst(event)",
+    summary:"makefirst(...) emits a priority event and records the priority.dispatch capability in a VM/Coto preview build.",
     points:[
-      "The call emits a visible priority event during a hosted run.",
-      "coto build creates a local VM/Coto preview manifest.",
-      "Preview manifests teach the workflow without pretending to be native VM modules."
+      "The event can be any expression that display can turn into text.",
+      "Run shows the priority event; build records the required capability.",
+      "The MiniOS manifest is a learning preview, not a native VM/Coto module."
     ],
     code:'makefirst("priority.dispatch demo");',
     commands:["coto sample vm","run","build"],
+    keywords:["priority","event","dispatch","queue","function","vm"],
     sample:"vm"
   },
   {
+    id:"return",
+    category:"Functions",
+    title:"return status",
+    summary:"return ends main and sends an integer status code back to Coto Shell. A zero status means success.",
+    points:[
+      "main returns an int, so its return formula must produce a whole number.",
+      "Statements after return are unreachable and produce a warning.",
+      "If return is omitted, the hosted preview uses status 0 and reports a warning."
+    ],
+    code:`func int main() {
+  return 0;
+}`,
+    commands:["check","run"],
+    keywords:["exit","status","return code","main","function"]
+  },
+  {
+    id:"arithmetic",
+    category:"Formulas",
+    title:"Arithmetic formulas",
+    summary:"Build checked integer formulas with +, -, *, /, %, unary minus, and parentheses.",
+    points:[
+      "Multiplication, division, and remainder run before addition and subtraction.",
+      "Integer division discards the fractional remainder; division by zero is an error.",
+      "Parentheses make the intended order explicit and checked ints reject overflow."
+    ],
+    code:`int subtotal = price * quantity;
+int total = subtotal + tax;
+int average = total / quantity;
+int remainder = total % quantity;`,
+    commands:["check","run"],
+    keywords:["math","formula","add","subtract","multiply","divide","modulo","remainder","precedence","parentheses","plus","minus"]
+  },
+  {
+    id:"comparisons",
+    category:"Formulas",
+    title:"Comparison formulas",
+    summary:"Comparison operators answer a question with FIRE or HOLD. Use them to compare equality or the order of integer values.",
+    points:[
+      "== means equal and != means not equal.",
+      "<, <=, >, and >= compare checked integers.",
+      "A comparison result can be stored in a bool or combined with logical operators."
+    ],
+    code:`bool exact = score == target;
+bool changed = name != "Coto";
+bool passing = score >= 70;
+bool in_range = score > 0 && score <= 100;`,
+    commands:["check","run"],
+    keywords:["compare","comparison","equal","not equal","less","greater","range","formula"]
+  },
+  {
+    id:"logic",
+    category:"Formulas",
+    title:"Boolean formulas",
+    summary:"Combine bool values with ! (not), && (and), and || (or) to describe a decision.",
+    points:[
+      "! reverses FIRE and HOLD.",
+      "&& is FIRE only when both sides are FIRE.",
+      "|| is FIRE when either side is FIRE; use parentheses when a formula mixes operators."
+    ],
+    code:`bool can_ship = paid && in_stock;
+bool needs_help = !ready || error;
+bool allowed = member && (ready || invited);`,
+    commands:["check","run"],
+    keywords:["logic","logical","and","or","not","condition","formula","truth table"]
+  },
+  {
+    id:"concatenation",
+    category:"Formulas",
+    title:"Text concatenation",
+    summary:"The double-dot operator (..) joins strings, integers, and booleans into one text value.",
+    points:[
+      "Unlike arithmetic +, double-dot always produces text.",
+      "Join labels and values to make readable output.",
+      "Use \\n, \\t, and escaped quotes inside strings when needed."
+    ],
+    code:`string label = "Score: " .. score;
+display(label .. " / Ready: " .. ready .. "\\n");`,
+    commands:["check","run"],
+    keywords:["string","text","join","concat","concatenate","double dot","formula","escape","newline"]
+  },
+  {
+    id:"precedence",
+    category:"Formulas",
+    title:"Operator precedence",
+    summary:"When a formula has several operators, Coto evaluates them in a predictable order. Parentheses are the clearest way to show intent.",
+    points:[
+      "First: parentheses and unary - or !; then *, /, and %; then + and -.",
+      "Next: <, <=, >, >=; then == and !=; then &&; then ||.",
+      "The text join operator .. is evaluated after the logical formula on each side."
+    ],
+    code:`int result = (2 + 3) * 4;
+bool valid = result >= 10 && result != 20;
+display("Valid: " .. valid .. "\\n");`,
+    commands:["check","run"],
+    keywords:["order of operations","operator","precedence","pemdas","formula","parentheses"]
+  },
+  {
     id:"workflow",
+    category:"Tools",
     title:"Edit, check, run, build",
     summary:"The shortest Coto learning loop is: open the shared file, make one change, validate it, run it, then build a preview when it is clean.",
     points:[
@@ -1191,14 +1367,24 @@ bool waiting = HOLD;`,
 CS> check
 CS> run
 CS> build`,
-    commands:["edit","check","run","build"]
+    commands:["edit","check","run","build"],
+    keywords:["compiler","diagnostics","shell","build","vm","tools"]
   }
 ];
+
+function searchCotoGuideTopics(value:string):CotoGuideTopic[] {
+  const terms=value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if(!terms.length) return COTO_GUIDE_TOPICS;
+  return COTO_GUIDE_TOPICS.filter(topic=>{
+    const searchable=[topic.id,topic.category,topic.title,topic.summary,...topic.points,...(topic.keywords || [])].join(" ").toLowerCase();
+    return terms.every(term=>searchable.includes(term));
+  });
+}
 
 function findCotoGuideTopic(value?:string):CotoGuideTopic|undefined {
   const query=(value || "").trim().toLowerCase();
   if(!query) return COTO_GUIDE_TOPICS[0];
-  return COTO_GUIDE_TOPICS.find(topic=>topic.id === query || topic.title.toLowerCase().includes(query));
+  return COTO_GUIDE_TOPICS.find(topic=>topic.id === query || topic.title.toLowerCase() === query) || searchCotoGuideTopics(query)[0];
 }
 
 function isCotoEditorDocument(document:MiniOSState["npp"]): boolean {
@@ -1212,7 +1398,7 @@ function cotoDocumentName(name:string): string {
 }
 
 function cotoOriginLabel(origin:CotoDocumentOrigin): string {
-  return origin === "minieditor" ? "MiniEditor" : origin === "guide" ? "Coto Guide" : "Coto Shell";
+  return origin === "minieditor" ? "MiniEditor" : origin === "guide" ? "Coto Standard Library" : "Coto Shell";
 }
 
 function syncCotoDocument(source:string,name:string,origin:CotoDocumentOrigin): CotoDocumentUpdate {
@@ -1758,11 +1944,11 @@ function runCotoSource(S:any,verifyVm=false){
 }
 
 function printCotoGuideIndex(S:any){
-  S.out('<span class="hd">Coto Language Guide</span> <span class="dim">— built into Coto Shell</span>');
-  S.text("Pick a short lesson, then try its commands against the same source open in MiniEditor.","dim");
+  S.out('<span class="hd">Coto Standard Library</span> <span class="dim">— built into MiniEditor + Coto Shell</span>');
+  S.text("Look up syntax, types, functions, and formulas, then try the commands against the source open in MiniEditor.","dim");
   COTO_GUIDE_TOPICS.forEach((topic,index)=>{
     const marker=index === (S.cotoGuideIndex ?? 0) ? "›" : " ";
-    S.out(`<span class="p3">${marker} ${String(index+1).padStart(2,"0")}</span>  <span class="ok">${esc(topic.id.padEnd(10))}</span>${esc(topic.title)}`);
+    S.out(`<span class="p3">${marker} ${String(index+1).padStart(2,"0")}</span>  <span class="ok">${esc(topic.id.padEnd(14))}</span><span class="dim">${esc(topic.category.padEnd(12))}</span>${esc(topic.title)}`);
   });
   S.out('  <span class="hd">guide &lt;topic&gt;</span> read here  ·  <span class="hd">guide next</span>  ·  <span class="hd">guide open &lt;topic&gt;</span> open beside your code');
   S.text(COTO_COPYRIGHT,"dim");
@@ -1792,7 +1978,7 @@ function printCotoGuideTopic(S:any,request?:string){
   S.cotoGuideIndex=index;
   const topic=COTO_GUIDE_TOPICS[index];
   S.out(`<span class="dim">CS /guide/${esc(topic.id)} ›</span>`);
-  S.out(`<span class="hd">${String(index+1).padStart(2,"0")} · ${esc(topic.title)}</span>`);
+  S.out(`<span class="hd">${String(index+1).padStart(2,"0")} · ${esc(topic.title)}</span> <span class="p3">${esc(topic.category)}</span>`);
   S.text(topic.summary);
   topic.points.forEach(point=>S.out(`  <span class="p3">•</span> ${esc(point)}`));
   if(topic.code){
@@ -1811,7 +1997,7 @@ function cotoCli(S:any,args:string[]){
     S.out('<span class="hd">Coto toolchain — MiniOS hosted subsystem preview</span>');
     S.text("The reference compiler is a local C11 prototype. This browser preview runs a safe language subset and does not replace its native backends.","dim");
     [
-      ["coto guide [topic]","read the Coto Language guide"],["coto open [topic]","open the guide beside MiniEditor"],["coto edit","open shared source in MiniEditor"],["coto source","print shared .coto source"],["coto sample [name]","load hello, kitchen, or vm"],
+      ["coto guide [topic]","read the Coto Standard Library"],["coto open [topic]","open the library beside MiniEditor"],["coto edit","open shared source in MiniEditor"],["coto source","print shared .coto source"],["coto sample [name]","load hello, kitchen, or vm"],
       ["coto check","parse and validate source"],["coto run","execute the hosted subset"],["coto build","build a local VM preview manifest"],
       ["coto vm-check","verify a VM preview"],["coto vm-run","verify and execute"],["coto targets","show reference compiler targets"],
       ["coto status","show Coto product-family status"],["coto copyright","show product ownership notice"]
@@ -1820,18 +2006,18 @@ function cotoCli(S:any,args:string[]){
     return;
   }
   if(["copyright","ownership","legal"].includes(sub)){ printCotoOwnership(S); return; }
-  if(["guide","learn","tutorial"].includes(sub)){
+  if(["guide","learn","tutorial","library","reference","docs"].includes(sub)){
     if(rest[0]?.toLowerCase() === "open"){
       const topic=findCotoGuideTopic(rest[1]);
       openMiniEditor({coto:true,guide:true,guideTopic:topic?.id});
-      S.text(`Opening Coto Guide${topic ? `: ${topic.title}` : ""} in MiniEditor…`,"ok");
+      S.text(`Opening Coto Standard Library${topic ? `: ${topic.title}` : ""} in MiniEditor…`,"ok");
     }else printCotoGuideTopic(S,rest[0]);
     return;
   }
   if(["open","lab","compiler","ecosystem","home"].includes(sub)){
     const topic=findCotoGuideTopic(rest[0]) || findCotoGuideTopic(sub === "open" ? "overview" : "workflow");
     openMiniEditor({coto:true,guide:true,guideTopic:topic?.id});
-    S.text(`Opening Coto Guide${topic ? `: ${topic.title}` : ""} in MiniEditor…`,"ok");
+    S.text(`Opening Coto Standard Library${topic ? `: ${topic.title}` : ""} in MiniEditor…`,"ok");
     return;
   }
   if(["edit","editor","code"].includes(sub)){ openMiniEditor({coto:true}); S.text(`Opening ${state.coto.sourceName} in MiniEditor…`,"ok"); return; }
@@ -1886,12 +2072,12 @@ function cotoCli(S:any,args:string[]){
   S.text(`coto: unknown command '${sub}' (try 'coto help')`,"err");
 }
 cmd("coto", "Coto compiler/subsystem: coto help", (S,args) => cotoCli(S,args));
-cmd("ecosystem mini-coto", "Open the Coto guide in MiniEditor", S => cotoCli(S,["open"]));
+cmd("ecosystem mini-coto", "Open the Coto Standard Library in MiniEditor", S => cotoCli(S,["open"]));
 cmd("check", "Check the saved Coto source", S => cotoCli(S,["check"]),["coto"]);
 cmd("run", "Run the saved Coto source", S => cotoCli(S,["run"]),["coto"]);
 cmd("build", "Build a VM/Coto preview manifest", S => cotoCli(S,["build"]),["coto"]);
 cmd("source", "Open the shared Coto source in MiniEditor", S => cotoCli(S,["edit"]),["coto"]);
-cmd("guide learn tutorial", "Coto Language guide: guide [topic|next|prev|open]", (S,args) => args[0]?.toLowerCase() === "open" ? cotoCli(S,["guide","open",...args.slice(1)]) : printCotoGuideTopic(S,args[0]),["coto"]);
+cmd("guide learn tutorial library reference docs", "Coto Standard Library: guide [topic|next|prev|open]", (S,args) => args[0]?.toLowerCase() === "open" ? cotoCli(S,["guide","open",...args.slice(1)]) : printCotoGuideTopic(S,args[0]),["coto"]);
 cmd("samples", "List or load Coto samples", (S,args) => cotoCli(S,["sample",...args]),["coto"]);
 cmd("targets", "Show reference compiler targets", S => cotoCli(S,["targets"]),["coto"]);
 cmd("subsystem", "Show OS/Coto subsystem status", S => cotoCli(S,["status"]),["coto"]);
@@ -2431,28 +2617,42 @@ function openMiniEditor(options:{coto?:boolean;guide?:boolean;guideTopic?:string
   editor.append(lines,ta);
   const workspace=el("div","npp-workspace");
   const guidePanel=el("aside","npp-coto-guide"); guidePanel.hidden=true;
-  guidePanel.setAttribute("aria-label","Coto Language Guide");
+  guidePanel.setAttribute("aria-label","Coto Standard Library");
   const guideHeader=el("div","npp-guide-header");
   const guideIcon=el("img"); guideIcon.src=ICONS.coto; guideIcon.alt="";
-  const guideIdentity=el("span"); guideIdentity.append(el("strong",null,"Coto Guide"),el("small",null,"LANGUAGE + SHELL"));
-  const guideClose=el("button","npp-guide-close","×"); guideClose.type="button"; guideClose.title="Close Coto Guide";
+  const guideIdentity=el("span"); guideIdentity.append(el("strong",null,"Coto Standard Library"),el("small",null,"SYNTAX · FUNCTIONS · FORMULAS"));
+  const guideClose=el("button","npp-guide-close","×"); guideClose.type="button"; guideClose.title="Close Coto Standard Library";
   guideHeader.append(guideIcon,guideIdentity,guideClose);
+  const guideSearch=el("div","npp-guide-search");
+  const guideSearchInput=el("input"); guideSearchInput.type="search"; guideSearchInput.placeholder="Search Coto…";
+  guideSearchInput.setAttribute("aria-label","Search Coto syntax, functions, and formulas");
+  const guideSearchClear=el("button",null,"×"); guideSearchClear.type="button"; guideSearchClear.title="Clear library search"; guideSearchClear.hidden=true;
+  guideSearch.append(guideSearchInput,guideSearchClear);
   const guideNav=el("div","npp-guide-nav");
-  const guideSelect=el("select"); guideSelect.setAttribute("aria-label","Coto guide topic");
+  const guideSelect=el("select"); guideSelect.setAttribute("aria-label","Coto library reference");
   COTO_GUIDE_TOPICS.forEach((topic,index)=>{
-    const option=el("option",null,`${String(index+1).padStart(2,"0")} · ${topic.title}`); option.value=topic.id; guideSelect.appendChild(option);
+    const option=el("option",null,`${String(index+1).padStart(2,"0")} · ${topic.category} · ${topic.title}`); option.value=topic.id; guideSelect.appendChild(option);
   });
-  guideNav.append(el("span",null,"TOPIC"),guideSelect);
+  guideNav.append(el("span",null,"REFERENCE"),guideSelect);
   const guideBody=el("div","npp-guide-body");
+  const guideResults=el("section","npp-guide-results"); guideResults.hidden=true;
+  const guideResultMeta=el("div","npp-guide-result-meta");
+  const guideResultList=el("div","npp-guide-result-list");
+  guideResults.append(guideResultMeta,guideResultList);
+  const guideArticle=el("article","npp-guide-article");
   const guidePrompt=el("div","npp-guide-prompt");
+  const guideCategory=el("div","npp-guide-category");
   const guideTitle=el("h3");
   const guideSummary=el("p","npp-guide-summary");
   const guidePoints=el("ul","npp-guide-points");
-  const guideCodeLabel=el("div","npp-guide-label","EXAMPLE");
+  const guideCodeLabel=el("div","npp-guide-label npp-guide-code-heading");
+  const guideCopy=el("button",null,"Copy"); guideCopy.type="button"; guideCopy.title="Copy this Coto example";
+  guideCodeLabel.append(el("span",null,"EXAMPLE"),guideCopy);
   const guideCode=el("pre","npp-guide-code");
   const guideTryLabel=el("div","npp-guide-label","TRY IN COTO SHELL");
   const guideCommands=el("div","npp-guide-commands");
-  guideBody.append(guidePrompt,guideTitle,guideSummary,guidePoints,guideCodeLabel,guideCode,guideTryLabel,guideCommands);
+  guideArticle.append(guidePrompt,guideCategory,guideTitle,guideSummary,guidePoints,guideCodeLabel,guideCode,guideTryLabel,guideCommands);
+  guideBody.append(guideResults,guideArticle);
   const guideFooter=el("div","npp-guide-footer");
   const guidePrev=el("button",null,"‹ Prev");
   const guideNext=el("button",null,"Next ›");
@@ -2462,7 +2662,7 @@ function openMiniEditor(options:{coto?:boolean;guide?:boolean;guideTopic?:string
   guideFooter.append(guidePrev,guideNext,guideLoad,guideShell);
   const guideLegal=el("div","npp-guide-legal"); guideLegal.title=`${COTO_PRODUCT_FAMILY}\n${COTO_COPYRIGHT}`;
   guideLegal.append(el("strong",null,COTO_COMPANY),el("span",null,"© 2026 · ALL RIGHTS RESERVED"));
-  guidePanel.append(guideHeader,guideNav,guideBody,guideFooter,guideLegal);
+  guidePanel.append(guideHeader,guideSearch,guideNav,guideBody,guideFooter,guideLegal);
   workspace.append(editor,guidePanel);
 
   const status = el("div","npp-status");
@@ -2633,7 +2833,11 @@ function openMiniEditor(options:{coto?:boolean;guide?:boolean;guideTopic?:string
         {label:"Zoom in        Ctrl++",action:()=>setFontSize(doc.fontSize+1)},{label:"Zoom out       Ctrl+-",action:()=>setFontSize(doc.fontSize-1)},{label:"Reset zoom     Ctrl+0",action:()=>setFontSize(12)}
       ]);
       else if(name === "Language") menu(r.left,r.bottom,LANGUAGES.map(label => ({label:(doc.language === label ? "✓ " : "") + label,action:()=>setLanguage(label)})));
-      else menu(r.left,r.bottom,[{label:"Keyboard shortcuts",action:()=>say("Ctrl+N  New document\nCtrl+O  Open text file\nCtrl+S  Save locally\nCtrl+F  Find\nF3  Find next\nCtrl+H  Replace all\nCtrl+G  Go to line\nCtrl++ / Ctrl+-  Zoom\nTab / Shift+Tab  Indent / outdent","MiniEditor shortcuts")},"-",{label:"About MiniEditor",action:()=>say(`A small, focused editor for ${activeTheme.shortName}. Documents autosave in this browser, and can be opened from or downloaded to your computer.`,"MiniEditor")}]);
+      else menu(r.left,r.bottom,[
+        {label:"Coto Standard Library      F1",action:()=>openCotoGuide(guideSelect.value)},"-",
+        {label:"Keyboard shortcuts",action:()=>say("F1      Coto Standard Library\nCtrl+N  New document\nCtrl+O  Open text file\nCtrl+S  Save locally\nCtrl+F  Find\nF3      Find next\nCtrl+H  Replace all\nCtrl+G  Go to line\nCtrl++ / Ctrl+-  Zoom\nTab / Shift+Tab  Indent / outdent","MiniEditor shortcuts")},"-",
+        {label:"About MiniEditor",action:()=>say(`A small, focused editor for ${activeTheme.shortName}. Documents autosave in this browser, and can be opened from or downloaded to your computer.`,"MiniEditor")}
+      ]);
     };
     mb.appendChild(item);
   });
@@ -2662,10 +2866,10 @@ function openMiniEditor(options:{coto?:boolean;guide?:boolean;guideTopic?:string
   const cotoSeparator=el("span","sep");
   const bCotoCheck=el("button",null,"Coto Check");
   const bCotoRun=el("button",null,"Run in CS");
-  const bCotoGuide=el("button",null,"Coto Guide");
+  const bCotoGuide=el("button",null,"Coto Library");
   bCotoCheck.title="Check the shared Coto source";
   bCotoRun.title="Run this source in Coto Shell";
-  bCotoGuide.title="Learn Coto beside the shared source";
+  bCotoGuide.title="Search Coto syntax, functions, and formulas (F1)";
   bCotoCheck.onclick=()=>{
     saveNow();
     const result=compileCoto(state.coto.source);
@@ -2677,13 +2881,12 @@ function openMiniEditor(options:{coto?:boolean;guide?:boolean;guideTopic?:string
     const shell=openTerminal("coto");
     setTimeout(()=>{ shell.out(""); runCommand(shell,"run"); shell.refreshPrompt(); },60);
   };
-  bCotoGuide.onclick=()=>{ saveNow(); if(guidePanel.hidden) openCotoGuide(guideSelect.value); else { guidePanel.hidden=true; ta.focus(); } };
-  const cotoControls=[cotoSeparator,bCotoCheck,bCotoRun,bCotoGuide];
+  bCotoGuide.onclick=()=>{ if(guidePanel.hidden) openCotoGuide(guideSelect.value); else { guidePanel.hidden=true; ta.focus(); } };
+  const cotoControls=[bCotoCheck,bCotoRun];
   refreshCotoTools=()=>{
     cotoControls.forEach(control=>control.hidden=!linkedToCoto);
     cotoLinkStatus.hidden=!linkedToCoto;
     cotoLinkStatus.textContent=linkedToCoto ? "COTO SYNC" : "";
-    if(!linkedToCoto) guidePanel.hidden=true;
   };
   toolbar.append(bNew,bOpen,bSave,bDownload,el("span","sep"),bFind,bWrap,el("span","sep"),languageLabel,cotoSeparator,bCotoCheck,bCotoRun,bCotoGuide,fileInput);
 
@@ -2699,8 +2902,14 @@ function openMiniEditor(options:{coto?:boolean;guide?:boolean;guideTopic?:string
   const renderCotoGuide=(requested?:string)=>{
     currentGuideTopic=findCotoGuideTopic(requested) || currentGuideTopic || COTO_GUIDE_TOPICS[0];
     const index=COTO_GUIDE_TOPICS.indexOf(currentGuideTopic);
+    guideSearchInput.value="";
+    guideSearchClear.hidden=true;
+    guideResults.hidden=true;
+    guideArticle.hidden=false;
+    guideFooter.hidden=false;
     guideSelect.value=currentGuideTopic.id;
     guidePrompt.textContent=`CS /guide/${currentGuideTopic.id} ›`;
+    guideCategory.textContent=currentGuideTopic.category;
     guideTitle.textContent=`${String(index+1).padStart(2,"0")} · ${currentGuideTopic.title}`;
     guideSummary.textContent=currentGuideTopic.summary;
     guidePoints.replaceChildren(...currentGuideTopic.points.map(point=>el("li",null,point)));
@@ -2712,12 +2921,49 @@ function openMiniEditor(options:{coto?:boolean;guide?:boolean;guideTopic?:string
     guideLoad.textContent=currentGuideTopic.sample ? `Load ${COTO_SAMPLES[currentGuideTopic.sample].label}` : "Load Example";
     guideBody.scrollTop=0;
   };
+  const renderCotoSearch=()=>{
+    const query=guideSearchInput.value.trim();
+    guideSearchClear.hidden=!query;
+    if(!query){
+      guideResults.hidden=true;
+      guideArticle.hidden=false;
+      guideFooter.hidden=false;
+      return;
+    }
+    const matches=searchCotoGuideTopics(query);
+    guideArticle.hidden=true;
+    guideResults.hidden=false;
+    guideFooter.hidden=true;
+    guideResultMeta.textContent=matches.length
+      ? `${matches.length} ${matches.length === 1 ? "result" : "results"} for “${query}”`
+      : `No Coto references found for “${query}”`;
+    if(!matches.length){
+      guideResultList.replaceChildren(el("p","npp-guide-empty","Try a function name such as display, a type such as bool, or a formula such as divide."));
+    }else{
+      guideResultList.replaceChildren(...matches.map(topic=>{
+        const result=el("button","npp-guide-result"); result.type="button";
+        result.append(el("span","npp-guide-result-category",topic.category),el("strong",null,topic.title),el("small",null,topic.summary));
+        result.onclick=()=>{ renderCotoGuide(topic.id); guideBody.focus(); };
+        return result;
+      }));
+    }
+    guideBody.scrollTop=0;
+  };
   openCotoGuide=(topic?:string)=>{
-    if(!linkedToCoto) loadSharedCotoDocument();
     guidePanel.hidden=false;
     renderCotoGuide(topic);
+    setTimeout(()=>guideSearchInput.focus(),0);
   };
   guideSelect.onchange=()=>renderCotoGuide(guideSelect.value);
+  guideSearchInput.oninput=renderCotoSearch;
+  guideSearchInput.onkeydown=event=>{
+    if(event.key === "Escape"){
+      event.preventDefault();
+      if(guideSearchInput.value){ guideSearchInput.value=""; renderCotoSearch(); }
+      else { guidePanel.hidden=true; ta.focus(); }
+    }
+  };
+  guideSearchClear.onclick=()=>{ guideSearchInput.value=""; renderCotoSearch(); guideSearchInput.focus(); };
   guidePrev.onclick=()=>{
     const index=Math.max(0,COTO_GUIDE_TOPICS.indexOf(currentGuideTopic)-1);
     renderCotoGuide(COTO_GUIDE_TOPICS[index].id);
@@ -2731,7 +2977,13 @@ function openMiniEditor(options:{coto?:boolean;guide?:boolean;guideTopic?:string
     if(!currentGuideTopic.sample) return;
     const sample=COTO_SAMPLES[currentGuideTopic.sample];
     syncCotoDocument(sample.source,sample.name,"guide");
-    flash(`Loaded ${sample.label} from Coto Guide`);
+    if(!linkedToCoto) loadSharedCotoDocument();
+    flash(`Loaded ${sample.label} from Coto Standard Library`);
+  };
+  guideCopy.onclick=()=>{
+    const copied=()=>flash(`Copied ${currentGuideTopic.title} example`);
+    if(navigator.clipboard?.writeText) navigator.clipboard.writeText(currentGuideTopic.code).then(copied,()=>say(currentGuideTopic.code,"Copy Coto example"));
+    else say(currentGuideTopic.code,"Copy Coto example");
   };
   guideShell.onclick=()=>{
     saveNow();
@@ -2753,6 +3005,7 @@ function openMiniEditor(options:{coto?:boolean;guide?:boolean;guideTopic?:string
   ta.addEventListener("scroll",()=>{ lines.scrollTop=ta.scrollTop; });
   ["click","keyup","select"].forEach(type=>ta.addEventListener(type,refreshPosition));
   ta.addEventListener("keydown",e=>{
+    if(e.key === "F1"){ e.preventDefault(); openCotoGuide(guideSelect.value); return; }
     if(e.ctrlKey && (e.key==="n" || e.key==="N")){ e.preventDefault(); newDocument(); return; }
     if(e.ctrlKey && (e.key==="o" || e.key==="O")){ e.preventDefault(); fileInput.click(); return; }
     if(e.ctrlKey && (e.key==="s" || e.key==="S")){ e.preventDefault(); saveNow(); flash("Saved locally"); return; }
@@ -2785,7 +3038,7 @@ function openMiniEditor(options:{coto?:boolean;guide?:boolean;guideTopic?:string
   w.body.append(mb,toolbar,tabs,workspace,status);
   setFontSize(doc.fontSize); setWrap(doc.wrap); refreshEditor();
   if(options.guide) openCotoGuide(options.guideTopic);
-  setTimeout(()=>options.guide ? guideSelect.focus() : ta.focus(),40);
+  setTimeout(()=>options.guide ? guideSearchInput.focus() : ta.focus(),40);
   return w;
 }
 
@@ -2937,10 +3190,10 @@ function openSettings(){
   // appearance
   const fsLook = el("fieldset"); fsLook.appendChild(el("legend",null,"Appearance"));
   const r3 = el("div","row"); r3.appendChild(el("span",null,"Desktop colour:"));
-  ["#008080","#3a6ea5","#5f89b4","#7b78a8","#000000","#7e9c7e","#a08050"].forEach(c => {
+  SOLID_WALLPAPER_PRESETS.forEach(({color:c}) => {
     const b = el("button"); b.style.background = c; b.style.minWidth = "26px"; b.style.width="26px"; b.style.height="20px";
     b.title = c;
-    b.onclick = () => { state.desktopColor = c; save(); applyChrome(); };
+    b.onclick = () => { state.desktopColor = c; save(); applyChrome(); refreshWallpaperControls(); };
     r3.appendChild(b);
   });
   fsLook.appendChild(r3);
@@ -2963,8 +3216,24 @@ function openSettings(){
 
   // wallpaper
   const fsWall = el("fieldset"); fsWall.appendChild(el("legend",null,"Wallpaper"));
-  fsWall.appendChild(el("div","hint","Choose a built-in desktop:"));
+  fsWall.appendChild(el("div","hint","Choose an image or a solid colour:"));
   const grid = el("div","wallpaper-grid");
+  const solidButtons = [];
+  SOLID_WALLPAPER_PRESETS.forEach(p => {
+    const b = el("button","wallpaper-choice");
+    const swatch = el("div","wallpaper-swatch"); swatch.style.background = p.color;
+    swatch.setAttribute("aria-hidden","true");
+    b.append(swatch, el("span",null,p.name));
+    b.title = `Use ${p.name} solid colour`;
+    b.onclick = () => {
+      state.wallpaper = "";
+      state.desktopColor = p.color;
+      iw.value = "";
+      save(); applyChrome(); refreshWallpaperControls();
+    };
+    solidButtons.push({ button:b, preset:p });
+    grid.appendChild(b);
+  });
   const presetButtons = [];
   WALLPAPER_PRESETS.forEach(p => {
     const b = el("button","wallpaper-choice");
@@ -3039,6 +3308,11 @@ function openSettings(){
       x.button.classList.toggle("selected", selected);
       x.button.setAttribute("aria-pressed", selected ? "true" : "false");
     });
+    solidButtons.forEach(x => {
+      const selected = !state.wallpaper && state.desktopColor.toLowerCase() === x.preset.color.toLowerCase();
+      x.button.classList.toggle("selected", selected);
+      x.button.setAttribute("aria-pressed", selected ? "true" : "false");
+    });
     st1.textContent = "You can also use a file in the MiniOS folder or paste an image URL.";
   };
   const syncWall = () => {
@@ -3047,7 +3321,7 @@ function openSettings(){
   iw.oninput = syncWall;
   preview.onload = () => { st1.textContent = "You can also use a file in the MiniOS folder or paste an image URL."; };
   preview.onerror = () => { st1.textContent = "That image did not load — check the file name."; };
-  const bNone = el("button",null,"No wallpaper");
+  const bNone = el("button",null,"Use desktop colour only");
   bNone.onclick = () => { iw.value = ""; syncWall(); };
   const rw4 = el("div","row"); rw4.appendChild(bNone);
   fsWall.append(rw4, st1);
@@ -3249,7 +3523,7 @@ function openHelp(){
         Pick your shell in Settings, or type <kbd>shell bash</kbd> / <kbd>shell zsh</kbd> / <kbd>shell powershell</kbd> / <kbd>shell coto</kbd>.<br><br>
         <b>Coto subsystem:</b> <kbd>guide</kbd> <kbd>guide structure</kbd> <kbd>coto open</kbd> <kbd>coto edit</kbd> <kbd>coto check</kbd> <kbd>coto run</kbd> <kbd>coto build</kbd> <kbd>coto copyright</kbd><br>
         Coto Shell blends Bash flow with PowerShell verbs and structured output. Try <kbd>aliases</kbd>, <kbd>ls | grep dev</kbd>, or <kbd>Get-ChildItem | Where-Object type=folder</kbd>.<br>
-        The Coto Guide lives inside Coto Shell and MiniEditor. Both use one live Coto source; type <kbd>guide open values</kbd> to place a lesson beside the code.<br>
+        The searchable <b>Coto Standard Library</b> lives inside MiniEditor; press <kbd>F1</kbd> to look up syntax, types, functions, and formulas. Type <kbd>guide open arithmetic</kbd> in Coto Shell to open a reference beside the code.<br>
         The integrated compiler runs a safe browser-hosted subset inspired by the working Coto v0 reference compiler.<br>
         <b>${esc(COTO_COPYRIGHT)}</b><br><br>
         <b>Getting around:</b> <kbd>ls</kbd> <kbd>cd Dev</kbd> <kbd>cd ..</kbd> <kbd>pwd</kbd> <kbd>tree</kbd><br>
@@ -3324,7 +3598,7 @@ function buildStart(){
      ["Coto Shell (CS) — Bash + PowerShell", ICONS.cotosh, ()=>openTerminal("coto")],
      ["Notepad", ICONS.notepad, ()=>openNotepad("welcome")],
      ["MiniEditor", ICONS.npp, ()=>openMiniEditor()],
-     ["Coto Guide — MiniEditor", ICONS.coto, ()=>openMiniEditor({coto:true,guide:true})],
+     ["Coto Standard Library — MiniEditor", ICONS.coto, ()=>openMiniEditor({coto:true,guide:true})],
      [activeTheme.computerName, ICONS.computer, ()=>openExplorer(state.fs)]
     ] as Array<[string,string,()=>unknown]>).forEach(([l,ic,a]) => s.appendChild(mkItem(l, ic, a)));
   }));
