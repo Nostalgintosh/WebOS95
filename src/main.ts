@@ -90,6 +90,34 @@ const ENGINES = {
   perplexity:{ name:"Perplexity", url:"https://www.perplexity.ai/search?q=" }
 };
 
+const TIME_ZONES = [
+  ["local","System time zone"],
+  ["UTC","UTC — Coordinated Universal Time"],
+  ["America/New_York","New York — Eastern Time"],
+  ["America/Chicago","Chicago — Central Time"],
+  ["America/Denver","Denver — Mountain Time"],
+  ["America/Phoenix","Phoenix — Arizona Time"],
+  ["America/Los_Angeles","Los Angeles — Pacific Time"],
+  ["America/Anchorage","Anchorage — Alaska Time"],
+  ["Pacific/Honolulu","Honolulu — Hawaii Time"],
+  ["America/Toronto","Toronto — Eastern Time"],
+  ["America/Mexico_City","Mexico City"],
+  ["America/Sao_Paulo","São Paulo"],
+  ["Europe/London","London"],
+  ["Europe/Paris","Paris"],
+  ["Europe/Berlin","Berlin"],
+  ["Africa/Cairo","Cairo"],
+  ["Africa/Johannesburg","Johannesburg"],
+  ["Asia/Dubai","Dubai"],
+  ["Asia/Kolkata","New Delhi — India Time"],
+  ["Asia/Singapore","Singapore"],
+  ["Asia/Hong_Kong","Hong Kong"],
+  ["Asia/Tokyo","Tokyo"],
+  ["Asia/Seoul","Seoul"],
+  ["Australia/Sydney","Sydney"],
+  ["Pacific/Auckland","Auckland"]
+] as const;
+
 const SHELLS = {
   powershell:{ label:"PowerShell", short:"PS", cls:"ps", icon:ICONS.terminal },
   bash:{ label:"Bash", short:"sh", cls:"bash", icon:ICONS.bash },
@@ -113,6 +141,8 @@ const defaults = (): MiniOSState => ({
   wallpaperFade: 100,          // 0-100, how strongly it shows over the desktop colour
   user: "matt",
   host: "web95",
+  timeZone: "local",
+  timeFormat: "12",
   showOmni: true,
   showToday: true,
   crtEffect: true,
@@ -1427,7 +1457,7 @@ cmd("shell chsh set-shell", "Switch shell: shell powershell|bash|zsh|coto", (S, 
 });
 cmd("clear cls clear-host", "Clear the screen", (S) => { S.scroll.innerHTML = ""; });
 cmd("echo write-output write-host print", "Print text", (S, args) => { S.text(args.join(" ")); });
-cmd("date get-date time", "Show date and time", (S) => { S.text(new Date().toString()); });
+cmd("date get-date time", "Show the configured date and time", (S) => { S.text(clockLabel(new Date())); });
 cmd("whoami", "Who am I", (S) => { S.text(S.shell === "powershell" ? state.host + "\\" + state.user : state.user); });
 cmd("history h", "Show command history", (S) => {
   S.hist.forEach((h,i) => S.out('<span class="dim">' + String(i+1).padStart(4) + '</span>  ' + esc(h)));
@@ -2667,6 +2697,42 @@ function openSettings(){
   r2c.appendChild(labToday); fsSearch.appendChild(r2c);
   box.appendChild(fsSearch);
 
+  // date and time
+  const fsDateTime = el("fieldset"); fsDateTime.appendChild(el("legend",null,"Date & time"));
+  const timeZoneRow = el("div","row"); timeZoneRow.appendChild(el("span",null,"Time zone:"));
+  const timeZoneSelect = el("select");
+  timeZoneSelect.setAttribute("aria-label","Time zone");
+  TIME_ZONES.forEach(([value,label]) => {
+    const option=el("option",null,label); option.value=value; option.selected=state.timeZone===value; timeZoneSelect.appendChild(option);
+  });
+  if(!TIME_ZONES.some(([value]) => value === state.timeZone)){
+    const option=el("option",null,state.timeZone); option.value=state.timeZone; option.selected=true; timeZoneSelect.appendChild(option);
+  }
+  timeZoneRow.appendChild(timeZoneSelect); fsDateTime.appendChild(timeZoneRow);
+
+  const timeFormatRow = el("div","row"); timeFormatRow.appendChild(el("span",null,"Clock format:"));
+  ([
+    ["12","12-hour (8:30 PM)"],
+    ["24","24-hour (20:30)"]
+  ] as const).forEach(([value,label]) => {
+    const choice=el("label");
+    const radio=el("input"); radio.type="radio"; radio.name="time-format"; radio.value=value; radio.checked=state.timeFormat===value;
+    radio.onchange=()=>{
+      if(!radio.checked) return;
+      state.timeFormat=value; save(); scheduleClock(); updateTimePreview();
+    };
+    choice.append(radio,el("span",null,label)); timeFormatRow.appendChild(choice);
+  });
+  fsDateTime.appendChild(timeFormatRow);
+  const timePreview=el("div","hint");
+  const updateTimePreview=()=>{ timePreview.textContent="Preview: " + clockLabel(new Date()) + " · daylight saving changes automatically"; };
+  timeZoneSelect.onchange=()=>{
+    state.timeZone=timeZoneSelect.value; save(); scheduleClock(); updateTimePreview();
+  };
+  updateTimePreview();
+  fsDateTime.appendChild(timePreview);
+  box.appendChild(fsDateTime);
+
   // appearance
   const fsLook = el("fieldset"); fsLook.appendChild(el("legend",null,"Appearance"));
   const r3 = el("div","row"); r3.appendChild(el("span",null,"Desktop colour:"));
@@ -2681,7 +2747,7 @@ function openSettings(){
   r4.appendChild(el("span",null,"User / host:"));
   const iu = el("input"); iu.type="text"; iu.value = state.user; iu.style.width="90px";
   const ih = el("input"); ih.type="text"; ih.value = state.host; ih.style.width="90px";
-  iu.oninput = () => { state.user = iu.value.replace(/\s/g,"") || "user"; save(); updateToday(new Date()); };
+  iu.oninput = () => { state.user = iu.value.replace(/\s/g,"") || "user"; save(); scheduleClock(); };
   ih.oninput = () => { state.host = ih.value.replace(/\s/g,"") || "web95"; save(); };
   r4.append(iu, el("span",null,"@"), ih);
   fsLook.appendChild(r4);
@@ -3182,38 +3248,65 @@ $("#today-daily").onclick = () => {
 $("#today-note").onclick = () => openNotepad("welcome");
 
 const CLOCK_MINUTE_MS = 60_000;
-const clockTimeFormat = new Intl.DateTimeFormat(undefined, {
-  hour:"numeric",
-  minute:"2-digit"
-});
-const clockDateFormat = new Intl.DateTimeFormat(undefined, {
-  month:"numeric",
-  day:"numeric",
-  year:"2-digit"
-});
-const clockLabelFormat = new Intl.DateTimeFormat(undefined, {
-  weekday:"long",
-  month:"long",
-  day:"numeric",
-  year:"numeric",
-  hour:"numeric",
-  minute:"2-digit",
-  timeZoneName:"short"
-});
+type ClockFormats = {
+  time:Intl.DateTimeFormat;
+  date:Intl.DateTimeFormat;
+  label:Intl.DateTimeFormat;
+  calendarParts:Intl.DateTimeFormat;
+};
+let clockFormatKey = "";
+let clockFormats:ClockFormats | null = null;
 let clockTimer: number | undefined;
+
+function activeTimeZone(): string | undefined {
+  if(!state.timeZone || state.timeZone === "local") return undefined;
+  try{
+    new Intl.DateTimeFormat(undefined,{timeZone:state.timeZone}).format();
+    return state.timeZone;
+  }catch{
+    return undefined;
+  }
+}
+
+function getClockFormats(): ClockFormats {
+  const timeZone = activeTimeZone();
+  const hourCycle = state.timeFormat === "24" ? "h23" : "h12";
+  const key = `${timeZone || "local"}|${hourCycle}`;
+  if(clockFormats && clockFormatKey === key) return clockFormats;
+  const zoneOptions = timeZone ? {timeZone} : {};
+  clockFormatKey = key;
+  clockFormats = {
+    time:new Intl.DateTimeFormat(undefined,{...zoneOptions,hour:"numeric",minute:"2-digit",hourCycle}),
+    date:new Intl.DateTimeFormat(undefined,{...zoneOptions,month:"numeric",day:"numeric",year:"2-digit"}),
+    label:new Intl.DateTimeFormat(undefined,{...zoneOptions,weekday:"long",month:"long",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit",hourCycle,timeZoneName:"short"}),
+    calendarParts:new Intl.DateTimeFormat("en-US",{...zoneOptions,year:"numeric",month:"numeric",day:"numeric",hour:"numeric",minute:"numeric",hourCycle:"h23"})
+  };
+  return clockFormats;
+}
+
+function calendarDateForClock(now:Date): Date {
+  if(!activeTimeZone()) return now;
+  const parts = Object.fromEntries(getClockFormats().calendarParts.formatToParts(now).map(part => [part.type,part.value]));
+  return new Date(Number(parts.year),Number(parts.month)-1,Number(parts.day),Number(parts.hour),Number(parts.minute));
+}
+
+function clockLabel(now:Date): string {
+  return getClockFormats().label.format(now).replace(/[\u00a0\u202f]/g," ");
+}
 
 function clock(){
   const d = new Date();
-  const label = clockLabelFormat.format(d);
+  const formats = getClockFormats();
+  const label = clockLabel(d);
   const clockElement = $("#clock");
   const dateElement = $("#tray-date");
 
-  clockElement.textContent = clockTimeFormat.format(d).replace(/[\u00a0\u202f]/g, " ");
-  dateElement.textContent = clockDateFormat.format(d);
+  clockElement.textContent = formats.time.format(d).replace(/[\u00a0\u202f]/g, " ");
+  dateElement.textContent = formats.date.format(d);
   clockElement.title = label;
   dateElement.title = label;
   $("#tray-time").setAttribute("aria-label", label);
-  updateToday(d);
+  updateToday(calendarDateForClock(d));
 }
 
 function scheduleClock(){

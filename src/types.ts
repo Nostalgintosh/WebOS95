@@ -2,6 +2,7 @@ export type Appearance = "win95" | "macos9";
 export type ShellName = "powershell" | "bash" | "zsh" | "coto";
 export type LinkTarget = "same" | "new";
 export type WallpaperMode = "fit" | "center" | "tile" | "stretch";
+export type TimeFormat = "12" | "24";
 
 export interface FolderNode {
   id: string;
@@ -61,6 +62,8 @@ export interface MiniOSState {
   wallpaperFade: number;
   user: string;
   host: string;
+  timeZone: string;
+  timeFormat: TimeFormat;
   showOmni: boolean;
   showToday: boolean;
   crtEffect: boolean;
