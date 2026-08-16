@@ -37,6 +37,8 @@ function normalizeState(stored: Partial<MiniOSState> | null, defaults: MiniOSSta
     shell: stored.shell === "bash" || stored.shell === "zsh" || stored.shell === "coto" ? stored.shell : "powershell",
     timeZone: typeof stored.timeZone === "string" ? stored.timeZone : defaults.timeZone,
     timeFormat: stored.timeFormat === "12" || stored.timeFormat === "24" ? stored.timeFormat : defaults.timeFormat,
+    soundEnabled: stored.soundEnabled !== false,
+    soundVolume: Number.isFinite(stored.soundVolume) ? Math.max(0, Math.min(100, Number(stored.soundVolume))) : defaults.soundVolume,
     fs: stored.fs ?? defaults.fs,
     notes: stored.notes ?? defaults.notes,
     npp: { ...defaults.npp, ...(stored.npp ?? {}) },

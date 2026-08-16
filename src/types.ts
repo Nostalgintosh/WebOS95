@@ -67,6 +67,8 @@ export interface MiniOSState {
   showOmni: boolean;
   showToday: boolean;
   crtEffect: boolean;
+  soundEnabled: boolean;
+  soundVolume: number;
   npp: EditorDocument;
   notes: Record<string, string>;
   iconPos: Record<string, Point>;

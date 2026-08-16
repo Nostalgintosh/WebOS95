@@ -146,6 +146,8 @@ const defaults = (): MiniOSState => ({
   showOmni: true,
   showToday: true,
   crtEffect: true,
+  soundEnabled: true,
+  soundVolume: 45,
   npp: { name:"Welcome.txt", language:"Plain text", wrap:false, fontSize:12, text:"Welcome to MiniEditor!\n\nYour work is saved automatically in this browser.\nOpen or drop a text file to edit it, and use Download to keep a copy.\n\nShortcuts: Ctrl+S save · Ctrl+F find · Ctrl+H replace · Ctrl+G go to line\n" },
   notes: { welcome: "MiniOS scratch pad\n==================\n\nThis text is saved in your browser.\n" },
   iconPos: {},
@@ -178,6 +180,96 @@ function save(){
     void stateStore.save(state).catch(error => console.error("Could not save MiniOS state", error));
   },120);
 }
+
+/* Original offline tones inspired by 1990s desktop sound design. */
+type SystemSound="startup"|"open"|"close"|"click"|"notify"|"error"|"shutdown";
+const AudioContextClass=window.AudioContext || (window as typeof window & { webkitAudioContext?:typeof AudioContext }).webkitAudioContext;
+let soundContext:AudioContext|null=null;
+let soundsUnlocked=false;
+let startupSoundPlayed=false;
+let suppressSoundsUntil=0;
+
+function ensureSoundContext():AudioContext|null {
+  if(soundContext) return soundContext;
+  if(!AudioContextClass) return null;
+  try{ soundContext=new AudioContextClass(); return soundContext; }
+  catch{ return null; }
+}
+
+function queueTone(context:AudioContext,when:number,frequency:number,endFrequency:number,duration:number,type:OscillatorType,level:number){
+  const oscillator=context.createOscillator();
+  const gain=context.createGain();
+  const volume=Math.max(0,Math.min(1,state.soundVolume/100));
+  const peak=Math.max(.0001,level*volume);
+  oscillator.type=type;
+  oscillator.frequency.setValueAtTime(Math.max(20,frequency),when);
+  oscillator.frequency.exponentialRampToValueAtTime(Math.max(20,endFrequency),when+duration);
+  gain.gain.setValueAtTime(.0001,when);
+  gain.gain.exponentialRampToValueAtTime(peak,when+Math.min(.025,duration*.18));
+  gain.gain.exponentialRampToValueAtTime(.0001,when+duration);
+  oscillator.connect(gain).connect(context.destination);
+  oscillator.start(when); oscillator.stop(when+duration+.02);
+}
+
+function renderSystemSound(context:AudioContext,sound:SystemSound){
+  const now=context.currentTime+.008;
+  if(sound !== "startup" && now < suppressSoundsUntil) return;
+  if(sound === "startup"){
+    suppressSoundsUntil=now+1.2;
+    queueTone(context,now,392,523,.34,"sine",.13);
+    queueTone(context,now+.16,523,659,.42,"triangle",.10);
+    queueTone(context,now+.36,659,784,.55,"sine",.12);
+    queueTone(context,now+.54,784,1047,.64,"triangle",.075);
+  }else if(sound === "open"){
+    queueTone(context,now,440,660,.11,"triangle",.08);
+    queueTone(context,now+.07,660,880,.14,"sine",.075);
+  }else if(sound === "close"){
+    queueTone(context,now,740,520,.10,"triangle",.065);
+    queueTone(context,now+.06,520,330,.13,"sine",.055);
+  }else if(sound === "click"){
+    queueTone(context,now,920,690,.035,"square",.025);
+  }else if(sound === "notify"){
+    queueTone(context,now,660,660,.14,"sine",.08);
+    queueTone(context,now+.12,990,990,.24,"sine",.07);
+  }else if(sound === "error"){
+    queueTone(context,now,220,185,.18,"triangle",.10);
+    queueTone(context,now+.17,185,147,.24,"triangle",.085);
+  }else if(sound === "shutdown"){
+    queueTone(context,now,659,523,.28,"sine",.09);
+    queueTone(context,now+.18,523,392,.36,"triangle",.08);
+    queueTone(context,now+.4,392,262,.5,"sine",.07);
+  }
+}
+
+function playSystemSound(sound:SystemSound){
+  if(!state.soundEnabled || state.soundVolume <= 0) return;
+  if(!soundContext && navigator.userActivation && !navigator.userActivation.isActive) return;
+  const context=ensureSoundContext();
+  if(!context) return;
+  if(context.state === "suspended"){
+    if(navigator.userActivation && !navigator.userActivation.isActive) return;
+    void context.resume().then(()=>{ soundsUnlocked=true; renderSystemSound(context,sound); }).catch(()=>{});
+    return;
+  }
+  soundsUnlocked=true;
+  renderSystemSound(context,sound);
+}
+
+function unlockSystemSounds(){
+  if(soundsUnlocked || !state.soundEnabled) return;
+  const context=ensureSoundContext();
+  if(!context) return;
+  const ready=()=>{
+    soundsUnlocked=true;
+    document.removeEventListener("pointerdown",unlockSystemSounds,true);
+    document.removeEventListener("keydown",unlockSystemSounds,true);
+    if(!startupSoundPlayed){ startupSoundPlayed=true; renderSystemSound(context,"startup"); }
+  };
+  if(context.state === "suspended") void context.resume().then(ready).catch(()=>{});
+  else ready();
+}
+document.addEventListener("pointerdown",unlockSystemSounds,true);
+document.addEventListener("keydown",unlockSystemSounds,true);
 
 function setAppearance(appearance: Appearance): void {
   if(state.appearance === appearance) return;
@@ -362,15 +454,17 @@ function makeWindow(opts: any): any {
   w.node = node; w.body = body; w.titleEl = tt; w.iconEl = ti;
   w.setTitle = t => { w.title = t; tt.textContent = t; syncTasks(); };
   w.close = () => {
+    playSystemSound("close");
     if(w.onClose) try{ w.onClose(); }catch(e){}
     node.remove();
     const i = wins.indexOf(w); if(i>=0) wins.splice(i,1);
     syncTasks();
     const last = wins.filter(x=>!x.min).pop(); if(last) focusWin(last);
   };
-  w.minimize = () => { w.min = true; node.classList.add("min"); syncTasks(); };
-  w.restore = () => { w.min = false; node.classList.remove("min"); focusWin(w); };
+  w.minimize = () => { playSystemSound("click"); w.min = true; node.classList.add("min"); syncTasks(); };
+  w.restore = () => { playSystemSound("open"); w.min = false; node.classList.remove("min"); focusWin(w); };
   w.toggleMax = () => {
+    playSystemSound("click");
     if(w.max){
       Object.assign(node.style, w.prev); w.max = false; bMax.textContent = "□";
     } else {
@@ -393,7 +487,7 @@ function makeWindow(opts: any): any {
   dragify(tbar, node, w);
   resizify(grip, node, w);
 
-  wins.push(w); focusWin(w); syncTasks();
+  wins.push(w); focusWin(w); syncTasks(); playSystemSound("open");
   return w;
 }
 
@@ -604,11 +698,13 @@ function dialog(opts: any): Promise<any> {
     m.appendChild(foot);
     wrap.classList.add("open");
     m.style.zIndex = String(++zTop);
+    playSystemSound(opts.sound || (opts.msgIcon === ICONS.warn ? "error" : "notify"));
 
     const first = Object.values(inputs)[0];
     if(first){ first.focus(); first.select(); } else foot.querySelector("button").focus();
 
     function finish(val){
+      playSystemSound("click");
       wrap.classList.remove("open");
       document.removeEventListener("keydown", key, true);
       if(val === null || val === false){ resolve(null); return; }
@@ -642,7 +738,7 @@ function menu(x: number, y: number, items: any[]){
     if(it === "-"){ ctx.appendChild(el("div","mdiv")); return; }
     const m = el("div","mi" + (it.disabled ? " disabled" : ""));
     m.appendChild(el("span",null,it.label));
-    if(!it.disabled) m.onclick = () => { hideMenus(); it.action && it.action(); };
+    if(!it.disabled) m.onclick = () => { playSystemSound("click"); hideMenus(); it.action && it.action(); };
     ctx.appendChild(m);
   });
   ctx.classList.add("open");
@@ -668,7 +764,7 @@ document.addEventListener("contextmenu", e => e.preventDefault());
    ============================================================ */
 function openNode(n: any){
   if(isFolder(n)) openExplorer(n);
-  else go(n.url);
+  else { playSystemSound("open"); go(n.url); }
 }
 function nodeMenu(n: any, x: number, y: number, ctxFolder?: any){
   const items = [
@@ -745,7 +841,6 @@ const SYSTEM_ICONS = [
   { id:"sys:term",     name:()=>SHELLS[state.shell].label, icon:()=>SHELLS[state.shell].icon, action:()=>openTerminal() },
   { id:"sys:notepad",  name:"Notepad",     icon:()=>ICONS.notepad, action:()=>openNotepad("welcome") },
   { id:"sys:npp",      name:"MiniEditor",  icon:()=>ICONS.npp, action:()=>openMiniEditor() },
-  { id:"sys:coto",     name:"Coto Ecosystem", icon:()=>ICONS.coto, action:()=>openCoto() },
   { id:"sys:settings", name:()=>activeTheme.menu.settings, icon:()=>ICONS.settings, action:()=>openSettings() },
   { id:"sys:help",     name:"Read Me",     icon:()=>ICONS.help, action:()=>openHelp() }
 ];
@@ -990,6 +1085,151 @@ function openExplorer(folder: FolderNode){
 /* ============================================================
    11. Terminal
    ============================================================ */
+type CotoDocumentOrigin = "minieditor"|"shell"|"guide";
+type CotoDocumentUpdate = { source:string; name:string; origin:CotoDocumentOrigin };
+
+const COTO_COMPANY="The Coto Computers, Co";
+const COTO_COPYRIGHT=`© 2026 ${COTO_COMPANY}. All rights reserved.`;
+const COTO_PRODUCT_FAMILY="Coto Language · Coto Compiler · Coto Shell · OS/Coto · Coto Ecosystem";
+
+type CotoGuideTopic = {
+  id:string;
+  title:string;
+  summary:string;
+  points:string[];
+  code:string;
+  commands:string[];
+  sample?:keyof typeof COTO_SAMPLES;
+};
+
+const COTO_GUIDE_TOPICS:CotoGuideTopic[] = [
+  {
+    id:"overview",
+    title:"Meet the Coto workflow",
+    summary:"Coto Language is the source, MiniEditor is the workbench, Coto Shell is the guide and command line, and the hosted compiler checks and runs the shared file.",
+    points:[
+      "One .coto document is shared live between MiniEditor and every Coto Shell window.",
+      "Everything is saved in this browser, so the learning workspace works locally.",
+      "The MiniOS compiler is a safe learning subset inspired by the Coto v0 reference compiler.",
+      `The Coto product family is copyrighted by ${COTO_COMPANY}.`
+    ],
+    code:'display("Hola from Coto!\\n");',
+    commands:["guide structure","edit","check","run"],
+    sample:"hello"
+  },
+  {
+    id:"structure",
+    title:"Program structure",
+    summary:"A Coto program names itself, enters its procedure division, and starts execution in a typed main function.",
+    points:[
+      "PROGRAM-ID gives the source a readable identity.",
+      "PROCEDURE DIVISION marks executable code.",
+      "func int main() returns an integer status code; zero means success."
+    ],
+    code:`IDENTIFICATION DIVISION.
+PROGRAM-ID. HELLO-COTO.
+
+PROCEDURE DIVISION.
+func int main() {
+  return 0;
+}`,
+    commands:["coto sample hello","check","run"],
+    sample:"hello"
+  },
+  {
+    id:"values",
+    title:"Values and FIRE / HOLD",
+    summary:"The hosted subset uses checked int values, strings, and Coto booleans: FIRE for true and HOLD for false.",
+    points:[
+      "Declare values with an explicit type such as int, string, or bool.",
+      "FIRE and HOLD make boolean state read like an active signal.",
+      "Integer expressions are checked instead of silently overflowing."
+    ],
+    code:`int ideas = 3;
+string system = "MiniOS";
+bool ready = FIRE;
+bool waiting = HOLD;`,
+    commands:["coto sample kitchen","source","run"],
+    sample:"kitchen"
+  },
+  {
+    id:"output",
+    title:"Display and concatenate",
+    summary:"Use display(...) to write output and the double-dot operator to join strings, numbers, and booleans.",
+    points:[
+      "The .. operator joins values into a single display expression.",
+      "Use \\n inside a string when you want a new output line.",
+      "Coto Shell shows program output directly below compiler diagnostics."
+    ],
+    code:'display("Ideas: " .. ideas .. "\\n");\ndisplay("Ready: " .. ready .. "\\n");',
+    commands:["check","run","coto source"],
+    sample:"hello"
+  },
+  {
+    id:"priority",
+    title:"Priority events",
+    summary:"makefirst(...) previews Coto's priority-oriented event idea and records the event in the hosted VM manifest.",
+    points:[
+      "The call emits a visible priority event during a hosted run.",
+      "coto build creates a local VM/Coto preview manifest.",
+      "Preview manifests teach the workflow without pretending to be native VM modules."
+    ],
+    code:'makefirst("priority.dispatch demo");',
+    commands:["coto sample vm","run","build"],
+    sample:"vm"
+  },
+  {
+    id:"workflow",
+    title:"Edit, check, run, build",
+    summary:"The shortest Coto learning loop is: open the shared file, make one change, validate it, run it, then build a preview when it is clean.",
+    points:[
+      "edit opens the shared source in MiniEditor.",
+      "check reports diagnostics with file, line, and column.",
+      "run executes the hosted subset; build writes a local preview manifest."
+    ],
+    code:`CS> edit
+CS> check
+CS> run
+CS> build`,
+    commands:["edit","check","run","build"]
+  }
+];
+
+function findCotoGuideTopic(value?:string):CotoGuideTopic|undefined {
+  const query=(value || "").trim().toLowerCase();
+  if(!query) return COTO_GUIDE_TOPICS[0];
+  return COTO_GUIDE_TOPICS.find(topic=>topic.id === query || topic.title.toLowerCase().includes(query));
+}
+
+function isCotoEditorDocument(document:MiniOSState["npp"]): boolean {
+  return document?.language === "Coto" || /\.coto$/i.test(document?.name || "");
+}
+
+function cotoDocumentName(name:string): string {
+  let clean=(name.trim() || "UNTITLED.coto").replace(/[^A-Za-z0-9._-]/g,"-");
+  if(!clean.toLowerCase().endsWith(".coto")) clean += ".coto";
+  return clean;
+}
+
+function cotoOriginLabel(origin:CotoDocumentOrigin): string {
+  return origin === "minieditor" ? "MiniEditor" : origin === "guide" ? "Coto Guide" : "Coto Shell";
+}
+
+function syncCotoDocument(source:string,name:string,origin:CotoDocumentOrigin): CotoDocumentUpdate {
+  const update={source,name:cotoDocumentName(name),origin};
+  const changed=state.coto.source !== update.source || state.coto.sourceName !== update.name;
+  state.coto.source=update.source;
+  state.coto.sourceName=update.name;
+  if(origin !== "minieditor" && isCotoEditorDocument(state.npp)){
+    state.npp.text=update.source;
+    state.npp.name=update.name;
+    state.npp.language="Coto";
+  }
+  save();
+  if(changed) wins.forEach(win => win.api?.syncCotoDocument?.(update));
+  return update;
+}
+
 function openTerminal(shell?: string): any {
   const sh     =   shell || state.shell;
   const conf   =   SHELLS[sh];
@@ -1062,27 +1302,30 @@ function openTerminal(shell?: string): any {
       input.value = "";
     }
   });
+  let cotoSyncTimer=0;
+  w.api.syncCotoDocument=(update:CotoDocumentUpdate)=>{
+    if(S.shell !== "coto" || update.origin === "shell") return;
+    if(cotoSyncTimer) window.clearTimeout(cotoSyncTimer);
+    cotoSyncTimer=window.setTimeout(()=>{
+      S.out(`<span class="p3">↻ ${esc(update.name)}</span> <span class="dim">synced from ${esc(cotoOriginLabel(update.origin))}</span>`);
+    },320);
+  };
+  w.onClose=()=>{ if(cotoSyncTimer) window.clearTimeout(cotoSyncTimer); };
   S.win = w;
   return S;
 }
 
 function banner(S: any){
-  const c = SHELLS[S.shell];
+  if(S.shell === "coto") return;
   if(S.shell === "powershell"){
     S.text(`Windows PowerShell (${activeTheme.shortName} Edition)`);
     S.text("Copyright (C) Nobody. All bookmarks reserved.");
   } else if(S.shell === "bash"){
     S.text("GNU bash, web95-release 5.2.web  (x86_64-pc-browser)");
-  } else if(S.shell === "coto"){
-    S.out('<span class="p3">Coto Shell (CS) 0.2</span> — Bash flow × PowerShell clarity');
-    S.text("OS/Coto Subsystem · local object pipeline · no network or host binaries", "dim");
   } else {
     S.text("zsh 5.9 (web95) — oh-my-web95 loaded");
   }
-  if(S.shell === "coto")
-    S.out('Use <span class="hd">ls</span> or <span class="hd">Get-ChildItem</span>, <span class="hd">grep</span> or <span class="hd">Select-String</span>. Type <span class="hd">aliases</span> to see the pairs.', "dim");
-  else
-    S.out(`Type <span class="hd">help</span> for commands, <span class="hd">ls</span> to list bookmarks, <span class="hd">open &lt;name&gt;</span> to launch one.`, "dim");
+  S.out(`Type <span class="hd">help</span> for commands, <span class="hd">ls</span> to list bookmarks, <span class="hd">open &lt;name&gt;</span> to launch one.`, "dim");
   S.text("");
 }
 
@@ -1226,6 +1469,7 @@ function fmtList(S: any, folder: FolderNode){
   }
 }
 function notFound(S: any, cmd: string){
+  playSystemSound("error");
   if(S.shell === "powershell")
     S.text(cmd + " : The term '" + cmd + "' is not recognized as the name of a cmdlet, function, script file, or operable program.", "err");
   else if(S.shell === "bash") S.text("bash: " + cmd + ": command not found", "err");
@@ -1282,7 +1526,7 @@ cmd("help man get-help ?", "Show this list", (S) => {
           (aliases.length ? ' <span class="dim">(' + esc(aliases.join(", ")) + ')</span>' : ""));
   });
   S.text("");
-  S.out('  <span class="dim">Tab completes names · ↑/↓ walks history · Ctrl+L clears</span>');
+  S.out('  <span class="dim">Close command typos autocorrect · Tab completes names · ↑/↓ walks history · Ctrl+L clears</span>');
   S.text("");
 });
 cmd("aliases alias get-alias", "Show Bash and PowerShell command pairs", (S) => printCotoVocabulary(S), ["coto"]);
@@ -1458,17 +1702,43 @@ cmd("shell chsh set-shell", "Switch shell: shell powershell|bash|zsh|coto", (S, 
 cmd("clear cls clear-host", "Clear the screen", (S) => { S.scroll.innerHTML = ""; });
 cmd("echo write-output write-host print", "Print text", (S, args) => { S.text(args.join(" ")); });
 cmd("date get-date time", "Show the configured date and time", (S) => { S.text(clockLabel(new Date())); });
+cmd("sound sounds", "System sounds: sound on|off|test|volume <0-100>", (S,args) => {
+  const action=(args[0] || "status").toLowerCase();
+  if(action === "on"){
+    state.soundEnabled=true; save(); playSystemSound("notify"); S.text(`System sounds on · volume ${state.soundVolume}%`,"ok"); return;
+  }
+  if(action === "off"){
+    state.soundEnabled=false; save(); S.text("System sounds off","dim"); return;
+  }
+  if(action === "volume"){
+    const requested=Number(args[1]);
+    if(!Number.isFinite(requested)){ S.text("usage: sound volume <0-100>","warn"); return; }
+    state.soundVolume=Math.max(0,Math.min(100,Math.round(requested))); save();
+    S.text(`System sound volume ${state.soundVolume}%`,"ok"); playSystemSound("click"); return;
+  }
+  if(action === "test"){
+    const requested=(args[1] || "startup").toLowerCase();
+    const sounds:SystemSound[]=["startup","open","close","click","notify","error","shutdown"];
+    if(!sounds.includes(requested as SystemSound)){ S.text("Sounds: " + sounds.join(", "),"warn"); return; }
+    if(!state.soundEnabled){ S.text("System sounds are off. Run: sound on","warn"); return; }
+    playSystemSound(requested as SystemSound); S.text(`Playing ${requested} sound`,"dim"); return;
+  }
+  S.text(`System sounds ${state.soundEnabled ? "on" : "off"} · volume ${state.soundVolume}%`);
+  S.text("sound on · sound off · sound test [name] · sound volume <0-100>","dim");
+});
 cmd("whoami", "Who am I", (S) => { S.text(S.shell === "powershell" ? state.host + "\\" + state.user : state.user); });
 cmd("history h", "Show command history", (S) => {
   S.hist.forEach((h,i) => S.out('<span class="dim">' + String(i+1).padStart(4) + '</span>  ' + esc(h)));
 });
-cmd("notepad edit nano vi vim", "Open the notepad", (S, args) => {
+cmd("notepad nano vi vim", "Open the Markdown notepad", (S, args) => {
   openNotepad(args.length ? args.join(" ") : "welcome");
   S.text("Opening notepad…", "ok");
 });
-cmd("minieditor editor npp notepad++ code", "Open MiniEditor", S => {
-  openMiniEditor();
-  S.text("Opening MiniEditor…", "ok");
+cmd("edit minieditor editor npp notepad++ code", "Open MiniEditor or the shared Coto source", (S,args) => {
+  const target=(args.join(" ") || "").toLowerCase();
+  const openCotoSource=S.shell === "coto" || target === "coto" || target === "source" || target.endsWith(".coto");
+  openMiniEditor({coto:openCotoSource});
+  S.text(openCotoSource ? `Opening shared Coto source: ${state.coto.sourceName}` : "Opening MiniEditor…", "ok");
 });
 function printCotoDiagnostics(S:any,result:ReturnType<typeof compileCoto>){
   if(!result.diagnostics.length){ S.text("No diagnostics. Zero Exception check passed.","ok"); return; }
@@ -1486,6 +1756,54 @@ function runCotoSource(S:any,verifyVm=false){
   result.priorityEvents.forEach(event => S.text(`makefirst → ${event}`,"p3"));
   S.text(`RETURN-CODE ${result.returnCode}`,result.returnCode === 0 ? "dim" : "warn");
 }
+
+function printCotoGuideIndex(S:any){
+  S.out('<span class="hd">Coto Language Guide</span> <span class="dim">— built into Coto Shell</span>');
+  S.text("Pick a short lesson, then try its commands against the same source open in MiniEditor.","dim");
+  COTO_GUIDE_TOPICS.forEach((topic,index)=>{
+    const marker=index === (S.cotoGuideIndex ?? 0) ? "›" : " ";
+    S.out(`<span class="p3">${marker} ${String(index+1).padStart(2,"0")}</span>  <span class="ok">${esc(topic.id.padEnd(10))}</span>${esc(topic.title)}`);
+  });
+  S.out('  <span class="hd">guide &lt;topic&gt;</span> read here  ·  <span class="hd">guide next</span>  ·  <span class="hd">guide open &lt;topic&gt;</span> open beside your code');
+  S.text(COTO_COPYRIGHT,"dim");
+}
+
+function printCotoOwnership(S:any){
+  S.out('<span class="hd">Coto Product Family</span>');
+  S.text(COTO_PRODUCT_FAMILY,"p3");
+  S.text(COTO_COPYRIGHT,"dim");
+}
+
+function printCotoGuideTopic(S:any,request?:string){
+  const value=(request || "").trim().toLowerCase();
+  if(!value || value === "list" || value === "topics"){ printCotoGuideIndex(S); return; }
+  let index=S.cotoGuideIndex ?? 0;
+  if(value === "next") index=(index+1)%COTO_GUIDE_TOPICS.length;
+  else if(value === "prev" || value === "previous") index=(index-1+COTO_GUIDE_TOPICS.length)%COTO_GUIDE_TOPICS.length;
+  else {
+    const topic=findCotoGuideTopic(value);
+    if(!topic){
+      S.text(`guide: unknown topic '${value}'`,"err");
+      S.text("Topics: " + COTO_GUIDE_TOPICS.map(item=>item.id).join(", "),"dim");
+      return;
+    }
+    index=COTO_GUIDE_TOPICS.indexOf(topic);
+  }
+  S.cotoGuideIndex=index;
+  const topic=COTO_GUIDE_TOPICS[index];
+  S.out(`<span class="dim">CS /guide/${esc(topic.id)} ›</span>`);
+  S.out(`<span class="hd">${String(index+1).padStart(2,"0")} · ${esc(topic.title)}</span>`);
+  S.text(topic.summary);
+  topic.points.forEach(point=>S.out(`  <span class="p3">•</span> ${esc(point)}`));
+  if(topic.code){
+    S.out('<span class="dim">┌─ example</span>');
+    topic.code.split("\n").forEach(line=>S.out(`<span class="dim">│</span> ${esc(line)}`));
+    S.out('<span class="dim">└────────</span>');
+  }
+  S.out('Try: ' + topic.commands.map(command=>`<span class="ok">${esc(command)}</span>`).join('  ·  '));
+  S.out('<span class="dim">guide next · guide prev · guide list · guide open</span>');
+}
+
 function cotoCli(S:any,args:string[]){
   const sub=(args[0]||"help").toLowerCase();
   const rest=args.slice(1);
@@ -1493,15 +1811,30 @@ function cotoCli(S:any,args:string[]){
     S.out('<span class="hd">Coto toolchain — MiniOS hosted subsystem preview</span>');
     S.text("The reference compiler is a local C11 prototype. This browser preview runs a safe language subset and does not replace its native backends.","dim");
     [
-      ["coto open","open Compiler Lab"],["coto source","print saved .coto source"],["coto sample [name]","load hello, kitchen, or vm"],
+      ["coto guide [topic]","read the Coto Language guide"],["coto open [topic]","open the guide beside MiniEditor"],["coto edit","open shared source in MiniEditor"],["coto source","print shared .coto source"],["coto sample [name]","load hello, kitchen, or vm"],
       ["coto check","parse and validate source"],["coto run","execute the hosted subset"],["coto build","build a local VM preview manifest"],
       ["coto vm-check","verify a VM preview"],["coto vm-run","verify and execute"],["coto targets","show reference compiler targets"],
-      ["coto status","show Coto product-family status"],["coto ecosystem","open the graphical ecosystem"]
+      ["coto status","show Coto product-family status"],["coto copyright","show product ownership notice"]
     ].forEach(([command,description])=>S.out(`  <span class="ok">${esc(command.padEnd(23))}</span>${esc(description)}`));
+    S.text(COTO_COPYRIGHT,"dim");
     return;
   }
-  if(["open","lab","compiler"].includes(sub)){ openCoto("compiler"); S.text("Opening Coto Compiler Lab…","ok"); return; }
-  if(["ecosystem","home"].includes(sub)){ openCoto("home"); S.text("Opening the Coto Ecosystem…","ok"); return; }
+  if(["copyright","ownership","legal"].includes(sub)){ printCotoOwnership(S); return; }
+  if(["guide","learn","tutorial"].includes(sub)){
+    if(rest[0]?.toLowerCase() === "open"){
+      const topic=findCotoGuideTopic(rest[1]);
+      openMiniEditor({coto:true,guide:true,guideTopic:topic?.id});
+      S.text(`Opening Coto Guide${topic ? `: ${topic.title}` : ""} in MiniEditor…`,"ok");
+    }else printCotoGuideTopic(S,rest[0]);
+    return;
+  }
+  if(["open","lab","compiler","ecosystem","home"].includes(sub)){
+    const topic=findCotoGuideTopic(rest[0]) || findCotoGuideTopic(sub === "open" ? "overview" : "workflow");
+    openMiniEditor({coto:true,guide:true,guideTopic:topic?.id});
+    S.text(`Opening Coto Guide${topic ? `: ${topic.title}` : ""} in MiniEditor…`,"ok");
+    return;
+  }
+  if(["edit","editor","code"].includes(sub)){ openMiniEditor({coto:true}); S.text(`Opening ${state.coto.sourceName} in MiniEditor…`,"ok"); return; }
   if(sub === "source"){
     S.text(`${state.coto.sourceName} — saved locally`,"hd");
     state.coto.source.split("\n").forEach((line,index)=>S.out(`<span class="dim">${String(index+1).padStart(3)}</span>  ${esc(line)}`));
@@ -1512,8 +1845,8 @@ function cotoCli(S:any,args:string[]){
     if(!key){ S.text("Samples: " + Object.entries(COTO_SAMPLES).map(([id,sample])=>`${id} (${sample.label})`).join(", ")); return; }
     const sample=COTO_SAMPLES[key];
     if(!sample){ S.text("Unknown sample. Choose: " + Object.keys(COTO_SAMPLES).join(", "),"warn"); return; }
-    state.coto.sourceName=sample.name; state.coto.source=sample.source; save();
-    S.text(`Loaded ${sample.name}. Use 'run' or 'source'.`,"ok"); return;
+    syncCotoDocument(sample.source,sample.name,"shell");
+    S.text(`Loaded ${sample.name}. MiniEditor and Coto Shell are now synced.`,"ok"); return;
   }
   if(sub === "check"){
     const result=compileCoto(state.coto.source); printCotoDiagnostics(S,result);
@@ -1545,20 +1878,24 @@ function cotoCli(S:any,args:string[]){
     S.out('  <span class="ok">Coto Compiler</span>   local C11 reference · MiniOS parser preview active');
     S.out('  <span class="ok">Coto Shell</span>      Bash + PowerShell hybrid · local object pipeline preview');
     S.out('  <span class="warn">OS/Coto Core</span>    early boot-verified kernel foundation');
+    S.out('  <span class="ok">Coto Ecosystem</span>  integrated guide · editor · toolchain experience');
     S.out('  <span class="p3">Storage</span>         local browser state · no account · no network');
+    S.text(COTO_COPYRIGHT,"dim");
     return;
   }
   S.text(`coto: unknown command '${sub}' (try 'coto help')`,"err");
 }
 cmd("coto", "Coto compiler/subsystem: coto help", (S,args) => cotoCli(S,args));
-cmd("ecosystem mini-coto", "Open the Coto Ecosystem", S => cotoCli(S,["ecosystem"]));
+cmd("ecosystem mini-coto", "Open the Coto guide in MiniEditor", S => cotoCli(S,["open"]));
 cmd("check", "Check the saved Coto source", S => cotoCli(S,["check"]),["coto"]);
 cmd("run", "Run the saved Coto source", S => cotoCli(S,["run"]),["coto"]);
 cmd("build", "Build a VM/Coto preview manifest", S => cotoCli(S,["build"]),["coto"]);
-cmd("source", "Open Coto Compiler Lab", S => cotoCli(S,["open"]),["coto"]);
+cmd("source", "Open the shared Coto source in MiniEditor", S => cotoCli(S,["edit"]),["coto"]);
+cmd("guide learn tutorial", "Coto Language guide: guide [topic|next|prev|open]", (S,args) => args[0]?.toLowerCase() === "open" ? cotoCli(S,["guide","open",...args.slice(1)]) : printCotoGuideTopic(S,args[0]),["coto"]);
 cmd("samples", "List or load Coto samples", (S,args) => cotoCli(S,["sample",...args]),["coto"]);
 cmd("targets", "Show reference compiler targets", S => cotoCli(S,["targets"]),["coto"]);
 cmd("subsystem", "Show OS/Coto subsystem status", S => cotoCli(S,["status"]),["coto"]);
+cmd("copyright ownership", "Show Coto product ownership notice", S => cotoCli(S,["copyright"]),["coto"]);
 cmd("explorer e", "Open a folder window", (S, args) => {
   const n = resolve(args.join(" ") || ".", S.cwd);
   if(!isFolder(n)){ S.text("Not a folder.", "err"); return; }
@@ -1731,6 +2068,43 @@ function runCotoPipeline(S:any, raw:string): boolean {
   return true;
 }
 
+const AUTOCORRECT_COMMANDS=new Set([
+  "help","aliases","which","ls","cd","pwd","stat","env","ps","open","cat","tree","search","grep","clear","echo","date","sound","whoami","history",
+  "notepad","edit","coto","ecosystem","check","run","build","source","guide","samples","targets","subsystem","copyright","explorer","settings","neofetch","export"
+]);
+
+function commandEditDistance(left:string,right:string):number {
+  const a=left.toLowerCase(), b=right.toLowerCase();
+  const rows=Array.from({length:a.length+1},()=>Array<number>(b.length+1).fill(0));
+  for(let i=0;i<=a.length;i++) rows[i][0]=i;
+  for(let j=0;j<=b.length;j++) rows[0][j]=j;
+  for(let i=1;i<=a.length;i++){
+    for(let j=1;j<=b.length;j++){
+      const cost=a[i-1] === b[j-1] ? 0 : 1;
+      rows[i][j]=Math.min(rows[i-1][j]+1,rows[i][j-1]+1,rows[i-1][j-1]+cost);
+      if(i>1 && j>1 && a[i-1] === b[j-2] && a[i-2] === b[j-1])
+        rows[i][j]=Math.min(rows[i][j],rows[i-2][j-2]+1);
+    }
+  }
+  return rows[a.length][b.length];
+}
+
+function autocorrectCommand(S:any,name:string):{name:string;command:any}|null {
+  if(name.length < 3 || /[^a-z0-9+?_-]/i.test(name)) return null;
+  const bestByPrimary=new Map<string,{name:string;command:any;distance:number}>();
+  Object.entries(COMMANDS).forEach(([candidate,command]:[string,any])=>{
+    if((command.shells && !command.shells.includes(S.shell)) || !AUTOCORRECT_COMMANDS.has(command.primary)) return;
+    const distance=commandEditDistance(name,candidate);
+    const current=bestByPrimary.get(command.primary);
+    if(!current || distance < current.distance) bestByPrimary.set(command.primary,{name:candidate,command,distance});
+  });
+  const ranked=[...bestByPrimary.values()].sort((a,b)=>a.distance-b.distance || a.name.localeCompare(b.name));
+  const best=ranked[0];
+  const limit=name.length >= 7 ? 2 : 1;
+  if(!best || best.distance > limit || ranked[1]?.distance === best.distance) return null;
+  return {name:best.name,command:best.command};
+}
+
 function runCommand(S, line){
   const raw = line.trim();
   if(!raw) return;
@@ -1746,6 +2120,12 @@ function runCommand(S, line){
   if(direct && !isFolder(direct)) return COMMANDS.open.run(S, [raw]);
   if(direct && isFolder(direct)) return COMMANDS.cd.run(S, [raw]);
   if(looksLikeUrl(raw)) return COMMANDS.open.run(S, [raw]);
+  const corrected=autocorrectCommand(S,name);
+  if(corrected){
+    const correctedRaw=corrected.name + raw.slice(parts[0].length);
+    S.out(`<span class="dim">autocorrect:</span> <span class="warn">${esc(parts[0])}</span> <span class="dim">→</span> <span class="ok">${esc(corrected.name)}</span>`);
+    return corrected.command.run(S,args,correctedRaw);
+  }
   notFound(S, parts[0]);
 }
 document.addEventListener("click", e => {
@@ -2023,13 +2403,20 @@ function openNotepad(key: string, seed?: string, title?: string){
   return w;
 }
 
-function openMiniEditor(){
+function openMiniEditor(options:{coto?:boolean;guide?:boolean;guideTopic?:string}={}){
   const ex = wins.find(x => x.kind === "npp");
-  if(ex){ focusWin(ex); return ex; }
+  if(ex){
+    if(options.coto) ex.api.openCotoDocument?.();
+    if(options.guide) ex.api.openCotoGuide?.(options.guideTopic);
+    focusWin(ex); return ex;
+  }
 
   const doc = state.npp = Object.assign({
     name:"Untitled.txt", language:"Plain text", wrap:false, fontSize:12, text:""
   }, state.npp || {});
+  if(options.coto) Object.assign(doc,{name:state.coto.sourceName,language:"Coto",text:state.coto.source});
+  let linkedToCoto=isCotoEditorDocument(doc);
+  if(linkedToCoto && !options.coto) syncCotoDocument(doc.text,doc.name,"minieditor");
   const w = makeWindow({ title:doc.name + " — MiniEditor", icon:ICONS.npp, kind:"npp", w:760, h:520 });
   const mb = el("div","menubar");
   const toolbar = el("div","npp-toolbar");
@@ -2042,6 +2429,41 @@ function openMiniEditor(){
   ta.value = doc.text || ""; ta.spellcheck = false; ta.wrap = doc.wrap ? "soft" : "off";
   ta.setAttribute("aria-label","MiniEditor document editor");
   editor.append(lines,ta);
+  const workspace=el("div","npp-workspace");
+  const guidePanel=el("aside","npp-coto-guide"); guidePanel.hidden=true;
+  guidePanel.setAttribute("aria-label","Coto Language Guide");
+  const guideHeader=el("div","npp-guide-header");
+  const guideIcon=el("img"); guideIcon.src=ICONS.coto; guideIcon.alt="";
+  const guideIdentity=el("span"); guideIdentity.append(el("strong",null,"Coto Guide"),el("small",null,"LANGUAGE + SHELL"));
+  const guideClose=el("button","npp-guide-close","×"); guideClose.type="button"; guideClose.title="Close Coto Guide";
+  guideHeader.append(guideIcon,guideIdentity,guideClose);
+  const guideNav=el("div","npp-guide-nav");
+  const guideSelect=el("select"); guideSelect.setAttribute("aria-label","Coto guide topic");
+  COTO_GUIDE_TOPICS.forEach((topic,index)=>{
+    const option=el("option",null,`${String(index+1).padStart(2,"0")} · ${topic.title}`); option.value=topic.id; guideSelect.appendChild(option);
+  });
+  guideNav.append(el("span",null,"TOPIC"),guideSelect);
+  const guideBody=el("div","npp-guide-body");
+  const guidePrompt=el("div","npp-guide-prompt");
+  const guideTitle=el("h3");
+  const guideSummary=el("p","npp-guide-summary");
+  const guidePoints=el("ul","npp-guide-points");
+  const guideCodeLabel=el("div","npp-guide-label","EXAMPLE");
+  const guideCode=el("pre","npp-guide-code");
+  const guideTryLabel=el("div","npp-guide-label","TRY IN COTO SHELL");
+  const guideCommands=el("div","npp-guide-commands");
+  guideBody.append(guidePrompt,guideTitle,guideSummary,guidePoints,guideCodeLabel,guideCode,guideTryLabel,guideCommands);
+  const guideFooter=el("div","npp-guide-footer");
+  const guidePrev=el("button",null,"‹ Prev");
+  const guideNext=el("button",null,"Next ›");
+  const guideLoad=el("button",null,"Load Example");
+  const guideShell=el("button",null,"Open CS");
+  [guidePrev,guideNext,guideLoad,guideShell].forEach(button=>button.type="button");
+  guideFooter.append(guidePrev,guideNext,guideLoad,guideShell);
+  const guideLegal=el("div","npp-guide-legal"); guideLegal.title=`${COTO_PRODUCT_FAMILY}\n${COTO_COPYRIGHT}`;
+  guideLegal.append(el("strong",null,COTO_COMPANY),el("span",null,"© 2026 · ALL RIGHTS RESERVED"));
+  guidePanel.append(guideHeader,guideNav,guideBody,guideFooter,guideLegal);
+  workspace.append(editor,guidePanel);
 
   const status = el("div","npp-status");
   const message = el("span","npp-message","Ready");
@@ -2049,10 +2471,13 @@ function openMiniEditor(){
   const position = el("span","npp-position","Ln 1, Col 1");
   const encoding = el("span",null,"UTF-8");
   const langStatus = el("span",null,doc.language);
+  const cotoLinkStatus = el("span","npp-coto-link","");
   const zoomStatus = el("span","npp-zoom","100%");
-  status.append(message,counts,position,encoding,langStatus,zoomStatus);
+  status.append(message,counts,position,encoding,langStatus,cotoLinkStatus,zoomStatus);
 
   let flashTimer = null;
+  let refreshCotoTools=()=>{};
+  let openCotoGuide=(topic?:string)=>{};
   const flash = text => {
     clearTimeout(flashTimer); message.textContent = text;
     flashTimer = setTimeout(()=>{ message.textContent = "Saved locally"; },1500);
@@ -2060,7 +2485,8 @@ function openMiniEditor(){
   const saveNow = () => {
     doc.text = ta.value;
     state.npp = doc;
-    save();
+    if(linkedToCoto) syncCotoDocument(doc.text,doc.name,"minieditor");
+    else save();
   };
   const queueSavedMessage = () => {
     clearTimeout(flashTimer); message.textContent = "Saving…";
@@ -2102,14 +2528,19 @@ function openMiniEditor(){
   const rename = async () => {
     const r = await dialog({ title:"Rename document", icon:ICONS.npp, fields:[{key:"name",label:"File name:",value:doc.name}] });
     if(!r || !r.name.trim()) return;
-    doc.name = r.name.trim(); syncDocumentName();
+    doc.name = r.name.trim();
+    if(/\.coto$/i.test(doc.name)){
+      doc.language="Coto"; linkedToCoto=true;
+      language.value=doc.language; langStatus.textContent=doc.language;
+    }
+    syncDocumentName(); refreshCotoTools();
     saveNow(); flash("Renamed");
   };
   const newDocument = async () => {
     if(ta.value.trim() && !(await ask("Start a new document? Your current document is already saved locally.","MiniEditor"))) return;
-    ta.value = ""; doc.name = "Untitled.txt"; doc.language = "Plain text";
+    ta.value = ""; doc.name = "Untitled.txt"; doc.language = "Plain text"; linkedToCoto=false;
     language.value = doc.language; langStatus.textContent = doc.language; syncDocumentName();
-    saveNow(); refreshEditor(); ta.focus(); flash("New document");
+    refreshCotoTools(); saveNow(); refreshEditor(); ta.focus(); flash("New document");
   };
   let lastFind = "";
   const findNext = (query?: string) => {
@@ -2175,9 +2606,9 @@ function openMiniEditor(){
     if(!file) return;
     if(ta.value.trim() && !(await ask("Open '" + file.name + "'? Your current document is already saved locally.","MiniEditor"))) return;
     try{
-      ta.value = await file.text(); doc.name = file.name || "Untitled.txt"; doc.language = languageForName(doc.name);
+      ta.value = await file.text(); doc.name = file.name || "Untitled.txt"; doc.language = languageForName(doc.name); linkedToCoto=doc.language === "Coto";
       language.value = doc.language; langStatus.textContent = doc.language; syncDocumentName();
-      saveNow(); refreshEditor(); ta.scrollTop = 0; lines.scrollTop = 0; ta.focus(); flash("Opened " + doc.name);
+      refreshCotoTools(); saveNow(); refreshEditor(); ta.scrollTop = 0; lines.scrollTop = 0; ta.focus(); flash(linkedToCoto ? "Opened and synced " + doc.name : "Opened " + doc.name);
     }catch(e){ say("MiniEditor could not read that file.","Open file"); }
   };
   fileInput.onchange = () => { const file = fileInput.files && fileInput.files[0]; loadFile(file).finally(()=>{ fileInput.value = ""; }); };
@@ -2217,10 +2648,106 @@ function openMiniEditor(){
   const language = el("select");
   const LANGUAGES = ["Plain text","Coto","JavaScript","HTML","CSS","JSON","Markdown","Shell","PowerShell"];
   LANGUAGES.forEach(name => { const o=el("option",null,name); o.value=name; if(name===doc.language)o.selected=true; language.appendChild(o); });
-  const setLanguage = name => { doc.language=name; language.value=name; langStatus.textContent=name; saveNow(); flash(name + " mode"); };
+  const setLanguage = name => {
+    doc.language=name; linkedToCoto=name === "Coto";
+    if(linkedToCoto && !/\.coto$/i.test(doc.name)){
+      doc.name=doc.name.replace(/\.[^.]+$/,"" ) + ".coto";
+      syncDocumentName();
+    }
+    language.value=name; langStatus.textContent=name; refreshCotoTools(); saveNow();
+    flash(linkedToCoto ? "Coto workspace linked" : name + " mode");
+  };
   language.onchange = () => setLanguage(language.value);
   const languageLabel = el("label"); languageLabel.append(el("span",null,"Language:"),language);
-  toolbar.append(bNew,bOpen,bSave,bDownload,el("span","sep"),bFind,bWrap,el("span","sep"),languageLabel,fileInput);
+  const cotoSeparator=el("span","sep");
+  const bCotoCheck=el("button",null,"Coto Check");
+  const bCotoRun=el("button",null,"Run in CS");
+  const bCotoGuide=el("button",null,"Coto Guide");
+  bCotoCheck.title="Check the shared Coto source";
+  bCotoRun.title="Run this source in Coto Shell";
+  bCotoGuide.title="Learn Coto beside the shared source";
+  bCotoCheck.onclick=()=>{
+    saveNow();
+    const result=compileCoto(state.coto.source);
+    if(result.ok) flash(`Coto check passed · ${result.instructions} instruction(s)`);
+    else flash(result.diagnostics[0] ? `${result.diagnostics[0].code}: ${result.diagnostics[0].message}` : "Coto check failed");
+  };
+  bCotoRun.onclick=()=>{
+    saveNow();
+    const shell=openTerminal("coto");
+    setTimeout(()=>{ shell.out(""); runCommand(shell,"run"); shell.refreshPrompt(); },60);
+  };
+  bCotoGuide.onclick=()=>{ saveNow(); if(guidePanel.hidden) openCotoGuide(guideSelect.value); else { guidePanel.hidden=true; ta.focus(); } };
+  const cotoControls=[cotoSeparator,bCotoCheck,bCotoRun,bCotoGuide];
+  refreshCotoTools=()=>{
+    cotoControls.forEach(control=>control.hidden=!linkedToCoto);
+    cotoLinkStatus.hidden=!linkedToCoto;
+    cotoLinkStatus.textContent=linkedToCoto ? "COTO SYNC" : "";
+    if(!linkedToCoto) guidePanel.hidden=true;
+  };
+  toolbar.append(bNew,bOpen,bSave,bDownload,el("span","sep"),bFind,bWrap,el("span","sep"),languageLabel,cotoSeparator,bCotoCheck,bCotoRun,bCotoGuide,fileInput);
+
+  const loadSharedCotoDocument=()=>{
+    linkedToCoto=true;
+    doc.name=state.coto.sourceName; doc.language="Coto"; doc.text=state.coto.source;
+    ta.value=doc.text; language.value=doc.language; langStatus.textContent=doc.language;
+    syncDocumentName(); refreshCotoTools(); refreshEditor(); save(); ta.focus();
+    flash("Linked to shared Coto workspace");
+  };
+  w.api.openCotoDocument=loadSharedCotoDocument;
+  let currentGuideTopic=findCotoGuideTopic(options.guideTopic) || COTO_GUIDE_TOPICS[0];
+  const renderCotoGuide=(requested?:string)=>{
+    currentGuideTopic=findCotoGuideTopic(requested) || currentGuideTopic || COTO_GUIDE_TOPICS[0];
+    const index=COTO_GUIDE_TOPICS.indexOf(currentGuideTopic);
+    guideSelect.value=currentGuideTopic.id;
+    guidePrompt.textContent=`CS /guide/${currentGuideTopic.id} ›`;
+    guideTitle.textContent=`${String(index+1).padStart(2,"0")} · ${currentGuideTopic.title}`;
+    guideSummary.textContent=currentGuideTopic.summary;
+    guidePoints.replaceChildren(...currentGuideTopic.points.map(point=>el("li",null,point)));
+    guideCode.textContent=currentGuideTopic.code;
+    guideCommands.replaceChildren(...currentGuideTopic.commands.map(command=>el("code",null,command)));
+    guidePrev.disabled=index === 0;
+    guideNext.disabled=index === COTO_GUIDE_TOPICS.length-1;
+    guideLoad.hidden=!currentGuideTopic.sample;
+    guideLoad.textContent=currentGuideTopic.sample ? `Load ${COTO_SAMPLES[currentGuideTopic.sample].label}` : "Load Example";
+    guideBody.scrollTop=0;
+  };
+  openCotoGuide=(topic?:string)=>{
+    if(!linkedToCoto) loadSharedCotoDocument();
+    guidePanel.hidden=false;
+    renderCotoGuide(topic);
+  };
+  guideSelect.onchange=()=>renderCotoGuide(guideSelect.value);
+  guidePrev.onclick=()=>{
+    const index=Math.max(0,COTO_GUIDE_TOPICS.indexOf(currentGuideTopic)-1);
+    renderCotoGuide(COTO_GUIDE_TOPICS[index].id);
+  };
+  guideNext.onclick=()=>{
+    const index=Math.min(COTO_GUIDE_TOPICS.length-1,COTO_GUIDE_TOPICS.indexOf(currentGuideTopic)+1);
+    renderCotoGuide(COTO_GUIDE_TOPICS[index].id);
+  };
+  guideClose.onclick=()=>{ guidePanel.hidden=true; ta.focus(); };
+  guideLoad.onclick=()=>{
+    if(!currentGuideTopic.sample) return;
+    const sample=COTO_SAMPLES[currentGuideTopic.sample];
+    syncCotoDocument(sample.source,sample.name,"guide");
+    flash(`Loaded ${sample.label} from Coto Guide`);
+  };
+  guideShell.onclick=()=>{
+    saveNow();
+    const shell=openTerminal("coto");
+    setTimeout(()=>{ shell.out(""); runCommand(shell,`guide ${currentGuideTopic.id}`); shell.refreshPrompt(); },60);
+  };
+  w.api.openCotoGuide=openCotoGuide;
+  w.api.syncCotoDocument=(update:CotoDocumentUpdate)=>{
+    if(!linkedToCoto || update.origin === "minieditor") return;
+    const cursor=Math.min(ta.selectionStart,update.source.length);
+    doc.name=update.name; doc.language="Coto"; doc.text=update.source; ta.value=update.source;
+    language.value=doc.language; langStatus.textContent=doc.language; ta.setSelectionRange(cursor,cursor);
+    syncDocumentName(); refreshCotoTools(); refreshEditor();
+    flash(`Synced from ${cotoOriginLabel(update.origin)}`);
+  };
+  refreshCotoTools();
 
   ta.addEventListener("input",()=>{ saveNow(); refreshEditor(); queueSavedMessage(); });
   ta.addEventListener("scroll",()=>{ lines.scrollTop=ta.scrollTop; });
@@ -2254,374 +2781,16 @@ function openMiniEditor(){
   editor.addEventListener("dragover",e=>{ if(e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")){ e.preventDefault(); editor.classList.add("drop-target"); } });
   editor.addEventListener("dragleave",e=>{ if(!editor.contains(e.relatedTarget as Node | null)) editor.classList.remove("drop-target"); });
   editor.addEventListener("drop",e=>{ e.preventDefault(); editor.classList.remove("drop-target"); loadFile(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]); });
-  w.onClose = saveNow;
-  w.body.append(mb,toolbar,tabs,editor,status);
+  w.onClose = () => { w.api.syncCotoDocument=null; w.api.openCotoGuide=null; saveNow(); };
+  w.body.append(mb,toolbar,tabs,workspace,status);
   setFontSize(doc.fontSize); setWrap(doc.wrap); refreshEditor();
-  setTimeout(()=>ta.focus(),40);
+  if(options.guide) openCotoGuide(options.guideTopic);
+  setTimeout(()=>options.guide ? guideSelect.focus() : ta.focus(),40);
   return w;
 }
 
 /* ============================================================
-   13. Coto Ecosystem
-   ============================================================ */
-type CotoView = "home" | "compiler" | "capture" | "studio" | "system";
-
-const COTO_ACCENTS: Record<MiniOSState["coto"]["accent"], { name:string; note:string }> = {
-  orbit: { name:"Orbit violet", note:"Curious and composed" },
-  coral: { name:"Human coral", note:"Warm and energetic" },
-  mint:  { name:"Fresh mint", note:"Clear and restorative" }
-};
-
-function openCoto(initialView: CotoView = "home"){
-  const existing = wins.find(x => x.kind === "coto");
-  if(existing){
-    focusWin(existing);
-    existing.api.openView?.(initialView);
-    return existing;
-  }
-
-  const w = makeWindow({ title:"Coto Ecosystem — OS/Coto Subsystem Preview", icon:ICONS.coto, kind:"coto", w:900, h:610 });
-  w.node.classList.add("coto-window");
-  const app = el("div","coto-app");
-  app.dataset.accent = state.coto.accent;
-
-  const sidebar = el("aside","coto-sidebar");
-  const brand = el("div","coto-brand");
-  const brandIcon = el("img"); brandIcon.src = ICONS.coto; brandIcon.alt = "";
-  const brandCopy = el("span"); brandCopy.append(el("strong",null,"coto"),el("small",null,"subsystem preview"));
-  brand.append(brandIcon,brandCopy);
-
-  const nav = el("nav","coto-nav");
-  nav.setAttribute("aria-label","Coto sections");
-  const navItems: Array<{ view:CotoView; icon:string; label:string }> = [
-    { view:"home", icon:"⌂", label:"Home" },
-    { view:"compiler", icon:"›_", label:"Compiler" },
-    { view:"capture", icon:"+", label:"Capture" },
-    { view:"studio", icon:"◇", label:"Studio" },
-    { view:"system", icon:"◎", label:"System" }
-  ];
-  const navButtons = new Map<CotoView,HTMLButtonElement>();
-  navItems.forEach(item => {
-    const button = el("button","coto-nav-button"); button.type = "button";
-    button.append(el("span","coto-nav-icon",item.icon),el("span",null,item.label));
-    button.onclick = () => setView(item.view);
-    navButtons.set(item.view,button);
-    nav.appendChild(button);
-  });
-  const localStatus = el("div","coto-local-status");
-  localStatus.append(el("i"),el("span",null,"Saved on this device"));
-  sidebar.append(brand,nav,localStatus);
-
-  const main = el("main","coto-main");
-  const topbar = el("header","coto-topbar");
-  const heading = el("div");
-  const eyebrow = el("div","coto-eyebrow","COTO ECOSYSTEM");
-  const viewTitle = el("div","coto-view-title","Home");
-  heading.append(eyebrow,viewTitle);
-  const localPill = el("span","coto-local-pill");
-  localPill.append(el("i"),document.createTextNode(" LOCAL"));
-  topbar.append(heading,localPill);
-  const surface = el("div","coto-surface");
-  main.append(topbar,surface);
-  app.append(sidebar,main);
-  w.body.appendChild(app);
-
-  const actionButton = (label:string, className:string, action:()=>void) => {
-    const button = el("button",className,label); button.type = "button"; button.onclick = action; return button;
-  };
-  const sectionHeading = (title:string, note:string) => {
-    const wrap = el("div","coto-section-heading");
-    const copy = el("div"); copy.append(el("h3",null,title),el("p",null,note));
-    wrap.appendChild(copy); return wrap;
-  };
-  const moduleCard = (mark:string, title:string, copy:string, detail:string, view:CotoView) => {
-    const card = el("article","coto-module-card");
-    const top = el("div","coto-module-top");
-    top.append(el("span","coto-module-mark",mark),el("span","coto-module-detail",detail));
-    const open = actionButton("Open →","coto-text-button",()=>setView(view));
-    card.append(top,el("h4",null,title),el("p",null,copy),open);
-    return card;
-  };
-
-  let compilerTranscript = "Ready. Check, run, or build the saved Coto source.";
-  let compilerTone: "idle"|"ok"|"error" = "idle";
-
-  const renderHome = () => {
-    const page = el("div","coto-page coto-home");
-    const hero = el("section","coto-hero");
-    const heroCopy = el("div","coto-hero-copy");
-    heroCopy.append(
-      el("span","coto-kicker","OS/COTO SUBSYSTEM PREVIEW / 01"),
-      el("h2",null,"A small window into the Coto platform."),
-      el("p",null,"Explore the language, compiler workflow, shell, and local-first ecosystem together inside MiniOS."),
-    );
-    const heroActions = el("div","coto-actions");
-    heroActions.append(
-      actionButton("Try the compiler","coto-button coto-button-primary",()=>setView("compiler")),
-      actionButton("Open Coto Shell","coto-button coto-button-quiet",()=>openTerminal("coto"))
-    );
-    heroCopy.appendChild(heroActions);
-    const orbit = el("div","coto-orbit");
-    orbit.setAttribute("aria-hidden","true");
-    orbit.append(el("i"),el("i"),el("i"),el("b",null,"C"));
-    hero.append(heroCopy,orbit);
-
-    const stats = el("section","coto-stats");
-    const openCount = state.coto.captures.filter(item => !item.done).length;
-    [
-      [String(openCount).padStart(2,"0"),"open ideas"],
-      [SHELLS[state.shell].short,"current shell"],
-      ["LOCAL","storage mode"]
-    ].forEach(([value,label]) => {
-      const stat = el("div","coto-stat"); stat.append(el("strong",null,value),el("span",null,label)); stats.appendChild(stat);
-    });
-
-    const heading = sectionHeading("The mini ecosystem","A connected taste of the compiler, language, shell, and product system.");
-    const modules = el("section","coto-module-grid");
-    modules.append(
-      moduleCard("›_","Compiler Lab","Edit, check, and run a real hosted Coto subset.",state.coto.sourceName,"compiler"),
-      moduleCard("+","Capture","Save the thought before it disappears.",`${state.coto.captures.length} saved`,"capture"),
-      moduleCard("◇","Studio","Try the color, type, and component rhythm.",COTO_ACCENTS[state.coto.accent].name,"studio"),
-      moduleCard("◎","System","See the principles holding everything together.","4 principles","system")
-    );
-    page.append(hero,stats,heading,modules);
-    return page;
-  };
-
-  const renderCompiler = () => {
-    const page=el("div","coto-page coto-compiler-page");
-    const intro=sectionHeading("Compiler Lab","A browser-local host for the Coto v0 structure, FIRE/HOLD values, display, checked ints, and VM preview manifests.");
-    const openShell=actionButton("Open Coto Shell","coto-button coto-button-quiet",()=>openTerminal("coto"));
-    intro.appendChild(openShell);
-
-    const toolbar=el("div","coto-compiler-toolbar");
-    const sampleLabel=el("label"); sampleLabel.appendChild(el("span",null,"Sample"));
-    const sampleSelect=el("select");
-    Object.entries(COTO_SAMPLES).forEach(([key,sample])=>{ const option=el("option",null,sample.label); option.value=key; sampleSelect.appendChild(option); });
-    sampleSelect.value=Object.entries(COTO_SAMPLES).find(([,sample])=>sample.name===state.coto.sourceName)?.[0] || "";
-    sampleLabel.appendChild(sampleSelect);
-    const checkButton=actionButton("Check","coto-button coto-button-quiet",()=>execute("check"));
-    const runButton=actionButton("Run","coto-button coto-button-primary",()=>execute("run"));
-    const buildButton=actionButton("Build VM preview","coto-button coto-button-quiet",()=>execute("build"));
-    toolbar.append(sampleLabel,checkButton,runButton,buildButton);
-
-    const workspace=el("div","coto-compiler-workspace");
-    const editorPanel=el("section","coto-code-panel");
-    const editorHead=el("div","coto-code-head");
-    const fileName=el("input","coto-file-name"); fileName.type="text"; fileName.value=state.coto.sourceName; fileName.maxLength=80; fileName.setAttribute("aria-label","Coto source file name");
-    editorHead.append(el("span",null,"SOURCE"),fileName);
-    const source=el("textarea","coto-source"); source.value=state.coto.source; source.spellcheck=false; source.wrap="off"; source.setAttribute("aria-label","Coto source editor");
-    editorPanel.append(editorHead,source);
-
-    const consolePanel=el("section","coto-code-panel coto-console-panel");
-    const consoleHead=el("div","coto-code-head");
-    const status=el("span","coto-compiler-status " + compilerTone,compilerTone === "ok" ? "PASSED" : compilerTone === "error" ? "FAILED" : "LOCAL PREVIEW");
-    consoleHead.append(el("span",null,"DIAGNOSTICS / OUTPUT"),status);
-    const output=el("pre","coto-compiler-output",compilerTranscript);
-    consolePanel.append(consoleHead,output);
-    workspace.append(editorPanel,consolePanel);
-
-    const syncSource=()=>{
-      state.coto.source=source.value;
-      state.coto.sourceName=(fileName.value.trim() || "UNTITLED.coto").replace(/[^A-Za-z0-9._-]/g,"-");
-      if(!state.coto.sourceName.toLowerCase().endsWith(".coto")) state.coto.sourceName += ".coto";
-      save();
-    };
-    function execute(mode:"check"|"run"|"build"){
-      syncSource();
-      const result=compileCoto(state.coto.source);
-      const lines:string[]=[`${mode.toUpperCase()} ${state.coto.sourceName}`,`${result.programId} · ${result.instructions} instruction(s)`];
-      if(result.diagnostics.length){
-        lines.push("");
-        result.diagnostics.forEach(item=>lines.push(`${item.severity.toUpperCase()} ${item.code} ${item.line}:${item.column}  ${item.message}`));
-      }else lines.push("","No diagnostics. Zero Exception check passed.");
-      if(result.ok && mode === "run"){
-        lines.push("","--- PROGRAM OUTPUT ---",result.output.replace(/\n$/,"") || "(no display output)");
-        result.priorityEvents.forEach(event=>lines.push(`makefirst → ${event}`));
-        lines.push(`RETURN-CODE ${result.returnCode}`);
-      }
-      if(result.ok && mode === "build"){
-        const module=buildCotoModule(state.coto.source,result);
-        lines.push("","--- VM PREVIEW MANIFEST ---",JSON.stringify(module,null,2),"","Not wire-compatible with reference VM/Coto modules.");
-      }
-      compilerTone=result.ok ? "ok" : "error";
-      compilerTranscript=lines.join("\n");
-      output.textContent=compilerTranscript;
-      status.className="coto-compiler-status " + compilerTone;
-      status.textContent=result.ok ? (mode === "run" ? "RETURN " + result.returnCode : "PASSED") : "FAILED";
-    }
-    source.addEventListener("input",syncSource); fileName.addEventListener("change",syncSource);
-    sampleSelect.onchange=()=>{
-      const sample=COTO_SAMPLES[sampleSelect.value];
-      if(!sample) return;
-      source.value=sample.source; fileName.value=sample.name;
-      syncSource(); compilerTone="idle"; compilerTranscript=`Loaded ${sample.name}. Ready to check or run.`;
-      output.textContent=compilerTranscript; status.className="coto-compiler-status idle"; status.textContent="LOCAL PREVIEW";
-      source.focus();
-    };
-
-    const reference=el("section","coto-language-reference");
-    [
-      ["STRUCTURE","IDENTIFICATION DIVISION.\nPROCEDURE DIVISION."],
-      ["VALUES","int · string · bool\nFIRE · HOLD"],
-      ["RUNTIME","display(…) · return\nmakefirst(…)"],
-      ["PORTABLE","vm-build · vm-check\nvm-run · VM/Coto 2.0"]
-    ].forEach(([label,copy])=>{ const card=el("article"); card.append(el("strong",null,label),el("pre",null,copy)); reference.appendChild(card); });
-    page.append(intro,toolbar,workspace,reference);
-    return page;
-  };
-
-  const renderCapture = () => {
-    const page = el("div","coto-page");
-    const intro = sectionHeading("Capture","A lightweight inbox for thoughts worth keeping.");
-    const tools = el("div","coto-inline-actions");
-    const exportCapture = actionButton("Send to Notepad","coto-button coto-button-quiet",() => {
-      const lines = state.coto.captures.map(item => `${item.done ? "[x]" : "[ ]"} ${item.text}`);
-      state.notes["coto-capture"] = `Coto Capture\n============\n\n${lines.join("\n") || "No captured ideas yet."}\n`;
-      save();
-      openNotepad("coto-capture",undefined,"Coto Capture");
-    });
-    const clearDone = actionButton("Clear completed","coto-text-button",() => {
-      state.coto.captures = state.coto.captures.filter(item => !item.done);
-      save(); render();
-    });
-    clearDone.disabled = !state.coto.captures.some(item => item.done);
-    tools.append(exportCapture,clearDone);
-    intro.appendChild(tools);
-
-    const form = el("form","coto-capture-form");
-    const input = el("input"); input.type = "text"; input.maxLength = 140;
-    input.placeholder = "What do you want to remember?";
-    input.setAttribute("aria-label","New Coto idea");
-    const add = el("button","coto-button coto-button-primary","Add idea"); add.type = "submit";
-    form.append(input,add);
-    form.onsubmit = event => {
-      event.preventDefault();
-      const text = input.value.trim();
-      if(!text) return;
-      state.coto.captures.unshift({ id:nid(), text, done:false, createdAt:Date.now() });
-      save(); render();
-      setTimeout(()=>surface.querySelector<HTMLInputElement>(".coto-capture-form input")?.focus(),0);
-    };
-
-    const list = el("section","coto-capture-list");
-    if(!state.coto.captures.length){
-      const empty = el("div","coto-empty");
-      empty.append(el("span",null,"○"),el("strong",null,"Room for a new thought"),el("p",null,"Your captures stay here, on this device."));
-      list.appendChild(empty);
-    }else{
-      state.coto.captures.forEach(item => {
-        const row = el("article","coto-capture-item" + (item.done ? " done" : ""));
-        const check = el("button","coto-check",item.done ? "✓" : ""); check.type = "button";
-        check.title = item.done ? "Mark as open" : "Mark as complete";
-        check.setAttribute("aria-label",`${check.title}: ${item.text}`);
-        check.onclick = () => { item.done = !item.done; save(); render(); };
-        const copy = el("div","coto-capture-copy");
-        const date = new Date(item.createdAt || Date.now()).toLocaleDateString(undefined,{ month:"short", day:"numeric" });
-        copy.append(el("strong",null,item.text),el("small",null,`${item.done ? "Completed" : "Captured"} · ${date}`));
-        const remove = el("button","coto-remove","×"); remove.type = "button"; remove.title = "Delete idea";
-        remove.setAttribute("aria-label",`Delete: ${item.text}`);
-        remove.onclick = () => { state.coto.captures = state.coto.captures.filter(x => x.id !== item.id); save(); render(); };
-        row.append(check,copy,remove); list.appendChild(row);
-      });
-    }
-    page.append(intro,form,list);
-    return page;
-  };
-
-  const renderStudio = () => {
-    const page = el("div","coto-page");
-    page.appendChild(sectionHeading("Coto Studio","A small, interactive sample of the Coto design language."));
-
-    const palettePanel = el("section","coto-panel");
-    palettePanel.append(el("span","coto-panel-label","ACCENT SYSTEM"),el("h3",null,"Choose the energy"),el("p",null,"Color changes the character, while the structure stays familiar."));
-    const palette = el("div","coto-palette");
-    (Object.keys(COTO_ACCENTS) as MiniOSState["coto"]["accent"][]).forEach(accent => {
-      const option = el("button","coto-accent-option" + (state.coto.accent === accent ? " selected" : "")); option.type = "button";
-      const swatch = el("span","coto-accent-swatch"); swatch.dataset.swatch = accent;
-      const copy = el("span"); copy.append(el("strong",null,COTO_ACCENTS[accent].name),el("small",null,COTO_ACCENTS[accent].note));
-      option.append(swatch,copy);
-      option.setAttribute("aria-pressed",state.coto.accent === accent ? "true" : "false");
-      option.onclick = () => { state.coto.accent = accent; app.dataset.accent = accent; save(); render(); };
-      palette.appendChild(option);
-    });
-    palettePanel.appendChild(palette);
-
-    const showcase = el("section","coto-showcase-grid");
-    const typePanel = el("article","coto-panel coto-type-panel");
-    typePanel.append(el("span","coto-panel-label","TYPE RHYTHM"),el("div","coto-type-display","Make space\nfor meaning."),el("p",null,"A confident headline, compact labels, and relaxed reading text create a clear path through the interface."));
-    const componentPanel = el("article","coto-panel");
-    componentPanel.append(el("span","coto-panel-label","COMPONENTS"),el("h3",null,"Soft edges, clear actions"));
-    const demo = el("div","coto-component-demo");
-    const demoInput = el("input"); demoInput.type = "text"; demoInput.placeholder = "A useful little thought"; demoInput.setAttribute("aria-label","Coto component preview");
-    const badge = el("span","coto-demo-badge","IN PROGRESS");
-    const progress = el("span","coto-demo-progress"); progress.appendChild(el("i"));
-    const demoActions = el("div","coto-actions");
-    demoActions.append(actionButton("Continue","coto-button coto-button-primary",()=>{}),actionButton("Later","coto-button coto-button-quiet",()=>{}));
-    demo.append(badge,demoInput,progress,demoActions); componentPanel.appendChild(demo);
-    showcase.append(typePanel,componentPanel);
-    page.append(palettePanel,showcase);
-    return page;
-  };
-
-  const renderSystem = () => {
-    const page = el("div","coto-page");
-    const manifesto = el("section","coto-manifesto");
-    const mark = el("div","coto-manifesto-mark","C");
-    const copy = el("div");
-    copy.append(el("span","coto-kicker","THE COTO SYSTEM"),el("h2",null,"Designed to feel clear before it feels clever."),el("p",null,"Coto connects calm surfaces, expressive details, and useful defaults into one recognizable experience."));
-    manifesto.append(mark,copy);
-
-    const principles = el("section","coto-principles");
-    [
-      ["01","Warm structure","Strong hierarchy without coldness or clutter."],
-      ["02","Clear rhythm","Space and type lead the eye before decoration does."],
-      ["03","Local by default","The experience stays useful without an account or network."],
-      ["04","Playful restraint","Personality appears in small, intentional moments."]
-    ].forEach(([number,title,description]) => {
-      const card = el("article","coto-principle");
-      card.append(el("span",null,number),el("h3",null,title),el("p",null,description)); principles.appendChild(card);
-    });
-
-    const architecture = el("section","coto-architecture");
-    const archCopy = el("div"); archCopy.append(el("strong",null,"OS/Coto Subsystem Preview is truly part of MiniOS."),el("p",null,"Native DOM · TypeScript · local compiler host · local storage · no external services"));
-    architecture.append(archCopy,actionButton("Open Compiler Lab","coto-button coto-button-primary",()=>setView("compiler")));
-    const productStatus=el("section","coto-product-status");
-    [
-      ["ACTIVE","Coto Language","Working v0 reference; hosted MiniOS subset available."],
-      ["ACTIVE","Coto Compiler","Local C11 prototype; interactive MiniOS parser preview."],
-      ["PREVIEW","Coto Shell","Bash flow, PowerShell verbs, and a lightweight local object pipeline."],
-      ["FOUNDATION","OS/Coto Core","Boot-verified early kernel work; not yet a usable operating system."]
-    ].forEach(([badge,title,note])=>{ const row=el("article"); row.append(el("span",null,badge),el("div",null)); row.lastElementChild.append(el("strong",null,title),el("p",null,note)); productStatus.appendChild(row); });
-    page.append(manifesto,principles,productStatus,architecture);
-    return page;
-  };
-
-  const titles: Record<CotoView,string> = { home:"Home", compiler:"Compiler Lab", capture:"Capture", studio:"Studio", system:"System" };
-  let currentView: CotoView = initialView;
-  function render(){
-    viewTitle.textContent = titles[currentView];
-    navButtons.forEach((button,view) => {
-      const selected = view === currentView;
-      button.classList.toggle("selected",selected);
-      if(selected) button.setAttribute("aria-current","page"); else button.removeAttribute("aria-current");
-    });
-    surface.replaceChildren(
-      currentView === "capture" ? renderCapture() :
-      currentView === "compiler" ? renderCompiler() :
-      currentView === "studio" ? renderStudio() :
-      currentView === "system" ? renderSystem() : renderHome()
-    );
-  }
-  function setView(view:CotoView){ currentView = view; render(); }
-
-  w.api.openView = setView;
-  render();
-  return w;
-}
-
-/* ============================================================
-   14. Settings
+   13. Settings
    ============================================================ */
 function openSettings(){
   const ex = wins.find(w => w.kind === "settings");
@@ -2732,6 +2901,38 @@ function openSettings(){
   updateTimePreview();
   fsDateTime.appendChild(timePreview);
   box.appendChild(fsDateTime);
+
+  // system sounds
+  const fsSound=el("fieldset"); fsSound.appendChild(el("legend",null,"System sounds"));
+  const soundToggleRow=el("div","row");
+  const soundToggleLabel=el("label");
+  const soundToggle=el("input"); soundToggle.type="checkbox"; soundToggle.checked=state.soundEnabled;
+  soundToggleLabel.append(soundToggle,el("span",null,"Enable retro system sounds"));
+  soundToggleRow.appendChild(soundToggleLabel); fsSound.appendChild(soundToggleRow);
+  const soundVolumeRow=el("div","row"); soundVolumeRow.appendChild(el("span",null,"Volume:"));
+  const soundVolume=el("input"); soundVolume.type="range"; soundVolume.min="0"; soundVolume.max="100"; soundVolume.step="5"; soundVolume.value=String(state.soundVolume); soundVolume.style.flex="1";
+  const soundVolumeValue=el("span",null,`${state.soundVolume}%`); soundVolumeValue.style.minWidth="34px";
+  soundVolumeRow.append(soundVolume,soundVolumeValue); fsSound.appendChild(soundVolumeRow);
+  const soundActions=el("div","row");
+  const testSound=el("button",null,"Preview startup sound"); testSound.type="button";
+  testSound.onclick=()=>playSystemSound("startup"); soundActions.appendChild(testSound); fsSound.appendChild(soundActions);
+  const soundHint=el("div","hint","Original synthesized tones inspired by 1990s desktop PCs. No downloaded recordings; works offline."); fsSound.appendChild(soundHint);
+  const refreshSoundControls=()=>{
+    const available=!!AudioContextClass;
+    soundVolume.disabled=!state.soundEnabled || !available;
+    testSound.disabled=!state.soundEnabled || !available;
+    soundHint.textContent=available
+      ? "Original synthesized tones inspired by 1990s desktop PCs. No downloaded recordings; works offline."
+      : "This browser does not provide the Web Audio feature required for system sounds.";
+  };
+  soundToggle.onchange=()=>{
+    state.soundEnabled=soundToggle.checked; save(); refreshSoundControls();
+    if(state.soundEnabled) playSystemSound("notify");
+  };
+  soundVolume.oninput=()=>{ state.soundVolume=Number(soundVolume.value); soundVolumeValue.textContent=`${soundVolume.value}%`; save(); };
+  soundVolume.onchange=()=>playSystemSound("click");
+  refreshSoundControls();
+  box.appendChild(fsSound);
 
   // appearance
   const fsLook = el("fieldset"); fsLook.appendChild(el("legend",null,"Appearance"));
@@ -3038,6 +3239,7 @@ function openHelp(){
         • <b>Drag</b> icons anywhere; drag items in a folder window onto another folder to move them.<br>
         • <b>MiniOS Today</b> keeps your daily folder and scratch pad close; hide or restore it in Settings.<br>
         • The <b>CRT screen effect</b> can be switched on or off under Settings → Appearance.<br>
+        • Original <b>retro system sounds</b> can be muted, previewed, or adjusted under Settings → System sounds.<br>
         • <b>MiniEditor</b> adds line numbers, open/download, find and replace, language modes, word wrap and an autosaved document.<br>
         • Right-click any item for Rename, Move, Delete, Properties.
       </div>
@@ -3045,16 +3247,18 @@ function openHelp(){
     <fieldset><legend>Terminal</legend>
       <div class="hint">
         Pick your shell in Settings, or type <kbd>shell bash</kbd> / <kbd>shell zsh</kbd> / <kbd>shell powershell</kbd> / <kbd>shell coto</kbd>.<br><br>
-        <b>Coto subsystem:</b> <kbd>coto help</kbd> <kbd>coto open</kbd> <kbd>coto check</kbd> <kbd>coto run</kbd> <kbd>coto build</kbd> <kbd>coto status</kbd><br>
+        <b>Coto subsystem:</b> <kbd>guide</kbd> <kbd>guide structure</kbd> <kbd>coto open</kbd> <kbd>coto edit</kbd> <kbd>coto check</kbd> <kbd>coto run</kbd> <kbd>coto build</kbd> <kbd>coto copyright</kbd><br>
         Coto Shell blends Bash flow with PowerShell verbs and structured output. Try <kbd>aliases</kbd>, <kbd>ls | grep dev</kbd>, or <kbd>Get-ChildItem | Where-Object type=folder</kbd>.<br>
-        Compiler Lab runs a safe browser-hosted subset inspired by the working Coto v0 reference compiler.<br><br>
+        The Coto Guide lives inside Coto Shell and MiniEditor. Both use one live Coto source; type <kbd>guide open values</kbd> to place a lesson beside the code.<br>
+        The integrated compiler runs a safe browser-hosted subset inspired by the working Coto v0 reference compiler.<br>
+        <b>${esc(COTO_COPYRIGHT)}</b><br><br>
         <b>Getting around:</b> <kbd>ls</kbd> <kbd>cd Dev</kbd> <kbd>cd ..</kbd> <kbd>pwd</kbd> <kbd>tree</kbd><br>
         <b>Using links:</b> <kbd>open github</kbd> <kbd>cat github</kbd> <kbd>grep hacker</kbd> <kbd>search rust traits</kbd><br>
         <b>Editing:</b> <kbd>mkdir Recipes</kbd> <kbd>add Docs docs.claude.com</kbd> <kbd>mv old new</kbd> <kbd>rm -r Old</kbd><br>
         <b>Looks:</b> <kbd>wallpaper logo fit 45%</kbd> <kbd>wallpaper none</kbd> <kbd>wallpaper tile</kbd><br>
-        <b>Extras:</b> <kbd>coto</kbd> <kbd>neofetch</kbd> <kbd>history</kbd> <kbd>notepad</kbd> <kbd>minieditor</kbd> <kbd>export</kbd> <kbd>import-browser</kbd> <kbd>help</kbd><br><br>
+        <b>Extras:</b> <kbd>coto</kbd> <kbd>sound test</kbd> <kbd>neofetch</kbd> <kbd>history</kbd> <kbd>notepad</kbd> <kbd>minieditor</kbd> <kbd>export</kbd> <kbd>import-browser</kbd> <kbd>help</kbd><br><br>
         PowerShell names work too — <kbd>Get-ChildItem</kbd>, <kbd>Set-Location</kbd>, <kbd>Remove-Item</kbd>, <kbd>cls</kbd>.
-        <kbd>Tab</kbd> completes, <kbd>↑</kbd>/<kbd>↓</kbd> walks history, <kbd>Ctrl+L</kbd> clears.
+        Close command typos autocorrect with a visible note. <kbd>Tab</kbd> completes, <kbd>↑</kbd>/<kbd>↓</kbd> walks history, <kbd>Ctrl+L</kbd> clears.
       </div>
     </fieldset>
     <fieldset><legend>Shortcuts</legend>
@@ -3109,7 +3313,7 @@ function buildStart(){
       sub(s);
       d.appendChild(s);
     } else if(action){
-      d.onclick = () => { hideMenus(); action(); };
+      d.onclick = () => { playSystemSound("click"); hideMenus(); action(); };
     }
     return d;
   };
@@ -3120,7 +3324,7 @@ function buildStart(){
      ["Coto Shell (CS) — Bash + PowerShell", ICONS.cotosh, ()=>openTerminal("coto")],
      ["Notepad", ICONS.notepad, ()=>openNotepad("welcome")],
      ["MiniEditor", ICONS.npp, ()=>openMiniEditor()],
-     ["Coto Ecosystem", ICONS.coto, ()=>openCoto()],
+     ["Coto Guide — MiniEditor", ICONS.coto, ()=>openMiniEditor({coto:true,guide:true})],
      [activeTheme.computerName, ICONS.computer, ()=>openExplorer(state.fs)]
     ] as Array<[string,string,()=>unknown]>).forEach(([l,ic,a]) => s.appendChild(mkItem(l, ic, a)));
   }));
@@ -3154,17 +3358,21 @@ function buildStart(){
   }));
   list.appendChild(el("div","mdiv"));
   list.appendChild(mkItem(activeTheme.menu.shutdown, ICONS.shutdown, async ()=>{
-    if(await ask(`Are you sure you want to shut down ${activeTheme.shortName}?`,activeTheme.menu.shutdown.replace("…",""))) $("#shutdown").classList.add("open");
+    if(await ask(`Are you sure you want to shut down ${activeTheme.shortName}?`,activeTheme.menu.shutdown.replace("…",""))){
+      playSystemSound("shutdown");
+      $("#shutdown").classList.add("open");
+    }
   }));
 }
 $("#start").onclick = e => {
   e.stopPropagation();
+  playSystemSound("click");
   const m = $("#startmenu");
   const open = m.classList.toggle("open");
   $("#start").classList.toggle("pressed", open);
   if(open){ buildStart(); m.style.zIndex = String(++zTop); }
 };
-$("#shutdown").onclick = () => $("#shutdown").classList.remove("open");
+$("#shutdown").onclick = () => { playSystemSound("open"); $("#shutdown").classList.remove("open"); };
 
 /* ============================================================
    16. Omnibar, clock, chrome, shortcuts
