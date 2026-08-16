@@ -4,14 +4,17 @@ export const AS_EXTENSION = /^(chrome|moz)-extension:$/.test(location.protocol);
 export const WINDOWS_LOGO = "Windows_Logo_(1992-2001).svg";
 
 const svg = (source: string): string => "data:image/svg+xml;utf8," + encodeURIComponent(source);
+const COTO_ECOSYSTEM_ICON = "assets/coto/icon.png";
 
 const sharedIcons = {
   terminal: svg(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect x="2" y="3" width="28" height="26" fill="#c0c0c0" stroke="#000" stroke-width="1.5"/><rect x="4" y="7" width="24" height="20" fill="#000080"/><text x="6" y="18" font-family="monospace" font-size="9" fill="#fff">&gt;_</text></svg>`),
   bash: svg(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect x="2" y="3" width="28" height="26" fill="#c0c0c0" stroke="#000" stroke-width="1.5"/><rect x="4" y="7" width="24" height="20" fill="#0c0c0c"/><text x="6" y="18" font-family="monospace" font-size="9" fill="#78dc52">$_</text></svg>`),
   zsh: svg(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect x="2" y="3" width="28" height="26" fill="#c0c0c0" stroke="#000" stroke-width="1.5"/><rect x="4" y="7" width="24" height="20" fill="#151515"/><text x="6" y="18" font-family="monospace" font-size="9" fill="#ff7ad9">%_</text></svg>`),
+  cotosh: svg(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="cs" x1="4" y1="4" x2="28" y2="28"><stop stop-color="#8068ef"/><stop offset="1" stop-color="#2b214d"/></linearGradient></defs><rect x="2" y="3" width="28" height="26" rx="3" fill="#c0c0c0" stroke="#000" stroke-width="1.5"/><rect x="4" y="7" width="24" height="20" rx="1" fill="url(#cs)"/><text x="6" y="19" font-family="monospace" font-size="9" font-weight="bold" fill="#fff">CS›</text><circle cx="25" cy="9" r="2" fill="#82e6bc"/></svg>`),
   npp: svg(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><path d="M5 2h19l4 4v24H5z" fill="#fff" stroke="#000"/><path d="M24 2v5h5" fill="#c0c0c0" stroke="#000"/><rect x="7" y="5" width="15" height="4" fill="#249c3d"/><path d="M8 13h12M8 17h9M8 21h12" stroke="#555"/><rect x="18" y="19" width="12" height="12" fill="#249c3d" stroke="#000"/><path d="M24 21v8M20 25h8" stroke="#fff" stroke-width="2"/></svg>`),
   shutdown: svg(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="17" r="11" fill="#c0c0c0" stroke="#000" stroke-width="1.5"/><path d="M16 5v12" stroke="#c00" stroke-width="4"/></svg>`),
   warn: svg(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><path d="M16 2l14 27H2z" fill="#ffd700" stroke="#000" stroke-width="1.5"/><text x="13" y="26" font-family="serif" font-size="17" font-weight="bold">!</text></svg>`),
+  coto: COTO_ECOSYSTEM_ICON,
 } as const;
 
 const win95Icons: IconSet = {

@@ -1,7 +1,8 @@
 import { $, el, esc } from "./dom";
+import { buildCotoModule, compileCoto, COTO_SAMPLES, COTO_TARGETS } from "./coto";
 import { createStateStore } from "./storage";
 import { AS_EXTENSION, THEMES, WINDOWS_LOGO, applyThemeIdentity, themeFor } from "./themes";
-import type { Appearance, FolderNode, MiniOSState } from "./types";
+import type { Appearance, FileSystemNode, FolderNode, MiniOSState } from "./types";
 
 async function boot(): Promise<void> {
 "use strict";
@@ -92,7 +93,8 @@ const ENGINES = {
 const SHELLS = {
   powershell:{ label:"PowerShell", short:"PS", cls:"ps", icon:ICONS.terminal },
   bash:{ label:"Bash", short:"sh", cls:"bash", icon:ICONS.bash },
-  zsh:{ label:"Zsh", short:"zsh", cls:"zsh", icon:ICONS.zsh }
+  zsh:{ label:"Zsh", short:"zsh", cls:"zsh", icon:ICONS.zsh },
+  coto:{ label:"Coto Shell (CS)", short:"CS", cls:"coto-shell", icon:ICONS.cotosh }
 };
 
 /* ============================================================
@@ -117,6 +119,14 @@ const defaults = (): MiniOSState => ({
   npp: { name:"Welcome.txt", language:"Plain text", wrap:false, fontSize:12, text:"Welcome to MiniEditor!\n\nYour work is saved automatically in this browser.\nOpen or drop a text file to edit it, and use Download to keep a copy.\n\nShortcuts: Ctrl+S save · Ctrl+F find · Ctrl+H replace · Ctrl+G go to line\n" },
   notes: { welcome: "MiniOS scratch pad\n==================\n\nThis text is saved in your browser.\n" },
   iconPos: {},
+  coto: {
+    accent: "orbit",
+    sourceName: COTO_SAMPLES.hello.name,
+    source: COTO_SAMPLES.hello.source,
+    captures: [
+      { id:"coto-welcome", text:"Shape one small idea into something useful", done:false, createdAt:Date.now() }
+    ]
+  },
   fs: defaultFS() as FolderNode
 });
 
@@ -702,9 +712,10 @@ async function moveDialog(n: any){
    ============================================================ */
 const SYSTEM_ICONS = [
   { id:"sys:computer", name:()=>activeTheme.computerName, icon:()=>ICONS.computer, action:()=>openExplorer(state.fs) },
-  { id:"sys:term",     name:"Terminal",    icon:()=>SHELLS[state.shell].icon, action:()=>openTerminal() },
+  { id:"sys:term",     name:()=>SHELLS[state.shell].label, icon:()=>SHELLS[state.shell].icon, action:()=>openTerminal() },
   { id:"sys:notepad",  name:"Notepad",     icon:()=>ICONS.notepad, action:()=>openNotepad("welcome") },
   { id:"sys:npp",      name:"MiniEditor",  icon:()=>ICONS.npp, action:()=>openMiniEditor() },
+  { id:"sys:coto",     name:"Coto Ecosystem", icon:()=>ICONS.coto, action:()=>openCoto() },
   { id:"sys:settings", name:()=>activeTheme.menu.settings, icon:()=>ICONS.settings, action:()=>openSettings() },
   { id:"sys:help",     name:"Read Me",     icon:()=>ICONS.help, action:()=>openHelp() }
 ];
@@ -980,6 +991,7 @@ function openTerminal(shell?: string): any {
     const p = S.cwd;
     if(S.shell === "powershell") return `<span class="p2">PS ${esc(pathString(p,"win"))}&gt;</span> `;
     if(S.shell === "bash") return `<span class="p1">${esc(state.user)}@${esc(state.host)}</span>:<span class="p2">${esc(pathString(p,"nix"))}</span>$ `;
+    if(S.shell === "coto") return `<span class="p3">CS</span> <span class="p2">${esc(pathString(p,"nix"))}</span> <span class="p1">›</span> `;
     return `<span class="p3">➜</span>  <span class="p2">${esc(pathString(p,"nix"))}</span> <span class="p1">❯</span> `;
   }
   function refreshPrompt(){
@@ -1031,10 +1043,16 @@ function banner(S: any){
     S.text("Copyright (C) Nobody. All bookmarks reserved.");
   } else if(S.shell === "bash"){
     S.text("GNU bash, web95-release 5.2.web  (x86_64-pc-browser)");
+  } else if(S.shell === "coto"){
+    S.out('<span class="p3">Coto Shell (CS) 0.2</span> — Bash flow × PowerShell clarity');
+    S.text("OS/Coto Subsystem · local object pipeline · no network or host binaries", "dim");
   } else {
     S.text("zsh 5.9 (web95) — oh-my-web95 loaded");
   }
-  S.out(`Type <span class="hd">help</span> for commands, <span class="hd">ls</span> to list bookmarks, <span class="hd">open &lt;name&gt;</span> to launch one.`, "dim");
+  if(S.shell === "coto")
+    S.out('Use <span class="hd">ls</span> or <span class="hd">Get-ChildItem</span>, <span class="hd">grep</span> or <span class="hd">Select-String</span>. Type <span class="hd">aliases</span> to see the pairs.', "dim");
+  else
+    S.out(`Type <span class="hd">help</span> for commands, <span class="hd">ls</span> to list bookmarks, <span class="hd">open &lt;name&gt;</span> to launch one.`, "dim");
   S.text("");
 }
 
@@ -1074,12 +1092,36 @@ function tokenize(line: string): string[] {
   if(cur) out.push(cur);
   return out;
 }
+function splitPipeline(line: string): string[] {
+  const stages: string[] = [];
+  let current = "", quote = "";
+  for(const character of line){
+    if(quote){
+      current += character;
+      if(character === quote) quote = "";
+      continue;
+    }
+    if(character === '"' || character === "'"){
+      quote = character;
+      current += character;
+      continue;
+    }
+    if(character === "|"){
+      if(current.trim()) stages.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += character;
+  }
+  if(current.trim()) stages.push(current.trim());
+  return stages;
+}
 function complete(S: any, input: HTMLInputElement){
   const val = input.value;
   const parts = tokenize(val);
   const partial = /\s$/.test(val) ? "" : (parts[parts.length-1] || "");
   if(parts.length <= 1 && !/\s$/.test(val)){
-    const names = Object.keys(COMMANDS).filter(c => c.startsWith(partial.toLowerCase()));
+    const names = Object.keys(COMMANDS).filter(c => c.startsWith(partial.toLowerCase()) && (!COMMANDS[c].shells || COMMANDS[c].shells.includes(S.shell)));
     if(names.length === 1) input.value = names[0] + " ";
     else if(names.length > 1){ S.out(promptHTMLPlain(S) + esc(val), "dim"); S.text(names.join("  ")); }
     return;
@@ -1101,10 +1143,34 @@ function complete(S: any, input: HTMLInputElement){
 const promptHTMLPlain = (_S: any) => "";
 
 /* --- command implementations ------------------------------------ */
+function sortedChildren(folder: FolderNode): FileSystemNode[] {
+  return (folder.children||[]).slice().sort((a,b)=>
+    (Number(isFolder(b))-Number(isFolder(a))) || a.name.localeCompare(b.name)
+  );
+}
+function fmtCotoObjects(S: any, items: FileSystemNode[], folder?: FolderNode){
+  if(folder){
+    S.out(`<span class="p3">CS objects</span>  <span class="dir">${esc(pathString(folder,"nix"))}</span>  <span class="dim">${esc(pathString(folder,"win"))}</span>`);
+  }
+  if(!items.length){ S.text("0 objects", "dim"); return; }
+  S.out('<span class="hd">Kind      Name                           Value</span>');
+  S.out('<span class="hd">----      ----                           -----</span>');
+  items.forEach(item => {
+    const kind = isFolder(item) ? "folder" : "link";
+    const name = (item.name.length > 30 ? item.name.slice(0,29) + "…" : item.name).padEnd(31);
+    const value = isFolder(item) ? `${item.children.length} object(s)` : item.url;
+    S.out(`<span class="p3">${esc(kind.padEnd(10))}</span>` +
+      (isFolder(item) ? `<span class="dir">${esc(name)}</span>` : `<span class="ok">${esc(name)}</span>`) +
+      (isFolder(item) ? `<span class="dim">${esc(value)}</span>` : `<span class="lnk" data-url="${esc(normalizeUrl(item.url))}">${esc(value)}</span>`));
+  });
+  S.text(`${items.length} object(s)`, "dim");
+}
 function fmtList(S: any, folder: FolderNode){
-  const kids = (folder.children||[]).slice().sort((a,b)=> (Number(isFolder(b))-Number(isFolder(a))) || a.name.localeCompare(b.name));
+  const kids = sortedChildren(folder);
   if(!kids.length){ S.text("(empty)", "dim"); return; }
-  if(S.shell === "powershell"){
+  if(S.shell === "coto"){
+    fmtCotoObjects(S, kids, folder);
+  } else if(S.shell === "powershell"){
     S.text("");
     S.text("    Directory: " + pathString(folder,"win"));
     S.text("");
@@ -1133,24 +1199,53 @@ function notFound(S: any, cmd: string){
   if(S.shell === "powershell")
     S.text(cmd + " : The term '" + cmd + "' is not recognized as the name of a cmdlet, function, script file, or operable program.", "err");
   else if(S.shell === "bash") S.text("bash: " + cmd + ": command not found", "err");
+  else if(S.shell === "coto") S.text("cs: command not found: " + cmd + " (try 'coto help')", "err");
   else S.text("zsh: command not found: " + cmd, "err");
 }
 function needArg(S: any, command: string){ S.text(command + ": missing operand", "err"); }
 
 const COMMANDS: Record<string, any> = {};
-function cmd(names: string, help: string, fn: any){
+function cmd(names: string, help: string, fn: any, shells?: MiniOSState["shell"][]){
   const list = names.split(/\s+/);
-  list.forEach((n,i) => COMMANDS[n] = { run:fn, help, primary:list[0], alias:i>0 });
+  list.forEach((n,i) => COMMANDS[n] = { run:fn, help, primary:list[0], alias:i>0, shells });
+}
+
+const COTO_COMMAND_PAIRS = [
+  ["ls", "Get-ChildItem", "list objects"],
+  ["cd", "Set-Location", "change location"],
+  ["pwd", "Get-Location", "show location"],
+  ["cat", "Get-Content", "read a bookmark"],
+  ["grep", "Select-String", "filter by text"],
+  ["stat", "Get-Item", "inspect an object"],
+  ["env", "Get-Variable", "show session values"],
+  ["ps", "Get-Process", "show MiniOS windows"],
+  ["clear", "Clear-Host", "clear the terminal"]
+] as const;
+
+function printCotoVocabulary(S:any){
+  S.out('<span class="hd">Bash          PowerShell         Coto action</span>');
+  S.out('<span class="hd">----          ----------         -----------</span>');
+  COTO_COMMAND_PAIRS.forEach(([bash,powerShell,description]) =>
+    S.out(`<span class="ok">${esc(bash.padEnd(14))}</span><span class="p2">${esc(powerShell.padEnd(19))}</span>${esc(description)}`)
+  );
+  S.text("Both names run the same local Coto command.", "dim");
 }
 
 cmd("help man get-help ?", "Show this list", (S) => {
   S.text("");
   S.out('<span class="hd">' + esc(activeTheme.shortName) + ' shell — ' + SHELLS[S.shell].label + '</span>');
   S.text("");
+  if(S.shell === "coto"){
+    S.text("Bash shortcuts and PowerShell verbs share one command model.", "dim");
+    printCotoVocabulary(S);
+    S.out('  <span class="p3">Pipeline</span>  ls | Where-Object type=folder | Sort-Object name');
+    S.out('  <span class="p3">Pipeline</span>  Get-ChildItem Dev | grep git | head 3');
+    S.text("");
+  }
   const seen = new Set();
   Object.keys(COMMANDS).forEach(k => {
     const c = COMMANDS[k];
-    if(c.alias || seen.has(c.primary)) return;
+    if(c.alias || seen.has(c.primary) || (c.shells && !c.shells.includes(S.shell))) return;
     seen.add(c.primary);
     const aliases = Object.keys(COMMANDS).filter(x => COMMANDS[x].primary === c.primary && x !== c.primary);
     S.out('  <span class="ok">' + esc(c.primary.padEnd(12)) + '</span>' + esc(c.help) +
@@ -1160,6 +1255,20 @@ cmd("help man get-help ?", "Show this list", (S) => {
   S.out('  <span class="dim">Tab completes names · ↑/↓ walks history · Ctrl+L clears</span>');
   S.text("");
 });
+cmd("aliases alias get-alias", "Show Bash and PowerShell command pairs", (S) => printCotoVocabulary(S), ["coto"]);
+cmd("which command get-command", "Resolve a command or alias", (S,args) => {
+  const requested = (args[0] || "").toLowerCase();
+  if(!requested){ printCotoVocabulary(S); return; }
+  const command = COMMANDS[requested];
+  if(!command || (command.shells && !command.shells.includes(S.shell))){
+    S.text(`Get-Command: '${args[0]}' was not found in this shell.`, "err");
+    return;
+  }
+  const aliases = Object.keys(COMMANDS).filter(name => COMMANDS[name].primary === command.primary && name !== command.primary);
+  S.out(`<span class="p3">Command</span>  ${esc(command.primary)}`);
+  S.out(`<span class="p3">Aliases</span>  ${esc(aliases.join(", ") || "(none)")}`);
+  S.out(`<span class="p3">Action</span>   ${esc(command.help)}`);
+}, ["coto"]);
 cmd("ls dir gci get-childitem l", "List the current folder", (S, args) => {
   const target = args.filter(a=>!a.startsWith("-"))[0];
   const n = resolve(target || ".", S.cwd);
@@ -1179,6 +1288,44 @@ cmd("cd chdir set-location sl", "Change folder", (S, args) => {
 cmd("pwd get-location gl", "Print current folder", (S) => {
   S.text(pathString(S.cwd, S.shell === "powershell" ? "win" : "nix"));
 });
+cmd("stat inspect get-item gi", "Inspect a folder or bookmark object", (S,args) => {
+  const item = resolve(args.join(" ") || ".", S.cwd);
+  if(!item){ S.text("Get-Item: object not found: " + args.join(" "), "err"); return; }
+  const details = [
+    ["Name", item.name],
+    ["Type", isFolder(item) ? "Folder" : "Bookmark"],
+    ["UnixPath", pathString(item,"nix")],
+    ["WinPath", pathString(item,"win")],
+    [isFolder(item) ? "Children" : "Target", isFolder(item) ? String(item.children.length) : item.url],
+    ["Storage", "Local MiniOS state"]
+  ];
+  details.forEach(([key,value]) => S.out(`<span class="p3">${esc(key.padEnd(10))}</span>${esc(value)}`));
+}, ["coto"]);
+cmd("env printenv get-variable gv", "Show the local Coto session values", (S) => {
+  const values = [
+    ["SHELL", "coto"],
+    ["CS_VERSION", "0.2"],
+    ["USER", state.user],
+    ["HOST", state.host],
+    ["PWD", pathString(S.cwd,"nix")],
+    ["MINIOS", activeTheme.shortName],
+    ["STORAGE", "local"]
+  ];
+  S.out('<span class="hd">Name          Value</span>');
+  S.out('<span class="hd">----          -----</span>');
+  values.forEach(([name,value]) => S.out(`<span class="ok">${esc(name.padEnd(14))}</span>${esc(value)}`));
+}, ["coto"]);
+cmd("ps get-process", "Show MiniOS windows as process objects", (S) => {
+  S.out('<span class="hd">Id      State       Kind          Name</span>');
+  S.out('<span class="hd">--      -----       ----          ----</span>');
+  wins.forEach((win,index) => {
+    const id = String(index + 101).padEnd(8);
+    const status = (win.min ? "stopped" : "running").padEnd(12);
+    const kind = String(win.kind || "window").padEnd(14);
+    S.out(`<span class="p3">${esc(id)}</span><span class="ok">${esc(status)}</span>${esc(kind + win.title)}`);
+  });
+  S.text(`${wins.length} local process object(s)`, "dim");
+}, ["coto"]);
 cmd("open start xdg-open launch", "Open a bookmark or URL", (S, args) => {
   if(!args.length) return needArg(S,"open");
   const raw = args.join(" ");
@@ -1268,12 +1415,12 @@ cmd("grep where select-string", "Find bookmarks by name or url", (S, args) => {
   })(state.fs);
   if(!hits) S.text("No matches.", "dim");
 });
-cmd("shell chsh set-shell", "Switch shell: shell powershell|bash|zsh", (S, args) => {
+cmd("shell chsh set-shell", "Switch shell: shell powershell|bash|zsh|coto", (S, args) => {
   const name = (args[0]||"").toLowerCase();
-  const map = { powershell:"powershell", pwsh:"powershell", ps:"powershell", ps1:"powershell", bash:"bash", sh:"bash", zsh:"zsh" };
-  if(!map[name]){ S.text("Available shells: powershell, bash, zsh", "warn"); S.text("Current: " + SHELLS[S.shell].label, "dim"); return; }
+  const map = { powershell:"powershell", pwsh:"powershell", ps:"powershell", ps1:"powershell", bash:"bash", sh:"bash", zsh:"zsh", coto:"coto", cs:"coto", cotosh:"coto" };
+  if(!map[name]){ S.text("Available shells: powershell, bash, zsh, coto", "warn"); S.text("Current: " + SHELLS[S.shell].label, "dim"); return; }
   S.shell = map[name];
-  state.shell = S.shell; save(); applyChrome();
+  state.shell = S.shell; save(); applyChrome(); renderIcons();
   S.scroll.innerHTML = "";
   banner(S);
   S.refreshPrompt();
@@ -1293,6 +1440,95 @@ cmd("minieditor editor npp notepad++ code", "Open MiniEditor", S => {
   openMiniEditor();
   S.text("Opening MiniEditor…", "ok");
 });
+function printCotoDiagnostics(S:any,result:ReturnType<typeof compileCoto>){
+  if(!result.diagnostics.length){ S.text("No diagnostics. Zero Exception check passed.","ok"); return; }
+  result.diagnostics.forEach(item => {
+    const location=`${state.coto.sourceName}:${item.line}:${item.column}`;
+    S.text(`${location} ${item.code} ${item.severity}: ${item.message}`,item.severity === "error" ? "err" : "warn");
+  });
+}
+function runCotoSource(S:any,verifyVm=false){
+  const result=compileCoto(state.coto.source);
+  printCotoDiagnostics(S,result);
+  if(!result.ok){ S.text("Coto execution stopped: source did not pass validation.","err"); return; }
+  if(verifyVm) S.text(`VM/Coto preview verified · ${result.instructions} instruction(s)`,"ok");
+  if(result.output) S.text(result.output.replace(/\n$/, ""));
+  result.priorityEvents.forEach(event => S.text(`makefirst → ${event}`,"p3"));
+  S.text(`RETURN-CODE ${result.returnCode}`,result.returnCode === 0 ? "dim" : "warn");
+}
+function cotoCli(S:any,args:string[]){
+  const sub=(args[0]||"help").toLowerCase();
+  const rest=args.slice(1);
+  if(sub === "help" || sub === "-h" || sub === "--help"){
+    S.out('<span class="hd">Coto toolchain — MiniOS hosted subsystem preview</span>');
+    S.text("The reference compiler is a local C11 prototype. This browser preview runs a safe language subset and does not replace its native backends.","dim");
+    [
+      ["coto open","open Compiler Lab"],["coto source","print saved .coto source"],["coto sample [name]","load hello, kitchen, or vm"],
+      ["coto check","parse and validate source"],["coto run","execute the hosted subset"],["coto build","build a local VM preview manifest"],
+      ["coto vm-check","verify a VM preview"],["coto vm-run","verify and execute"],["coto targets","show reference compiler targets"],
+      ["coto status","show Coto product-family status"],["coto ecosystem","open the graphical ecosystem"]
+    ].forEach(([command,description])=>S.out(`  <span class="ok">${esc(command.padEnd(23))}</span>${esc(description)}`));
+    return;
+  }
+  if(["open","lab","compiler"].includes(sub)){ openCoto("compiler"); S.text("Opening Coto Compiler Lab…","ok"); return; }
+  if(["ecosystem","home"].includes(sub)){ openCoto("home"); S.text("Opening the Coto Ecosystem…","ok"); return; }
+  if(sub === "source"){
+    S.text(`${state.coto.sourceName} — saved locally`,"hd");
+    state.coto.source.split("\n").forEach((line,index)=>S.out(`<span class="dim">${String(index+1).padStart(3)}</span>  ${esc(line)}`));
+    return;
+  }
+  if(sub === "sample"){
+    const key=(rest[0]||"").toLowerCase();
+    if(!key){ S.text("Samples: " + Object.entries(COTO_SAMPLES).map(([id,sample])=>`${id} (${sample.label})`).join(", ")); return; }
+    const sample=COTO_SAMPLES[key];
+    if(!sample){ S.text("Unknown sample. Choose: " + Object.keys(COTO_SAMPLES).join(", "),"warn"); return; }
+    state.coto.sourceName=sample.name; state.coto.source=sample.source; save();
+    S.text(`Loaded ${sample.name}. Use 'run' or 'source'.`,"ok"); return;
+  }
+  if(sub === "check"){
+    const result=compileCoto(state.coto.source); printCotoDiagnostics(S,result);
+    if(result.ok) S.text(`CHECK OK · ${result.programId} · ${result.instructions} instruction(s)`,"ok");
+    return;
+  }
+  if(sub === "run"){ runCotoSource(S); return; }
+  if(sub === "vm-run"){ runCotoSource(S,true); return; }
+  if(sub === "build" || sub === "vm-build" || sub === "vm-check"){
+    const result=compileCoto(state.coto.source); printCotoDiagnostics(S,result);
+    const module=buildCotoModule(state.coto.source,result);
+    if(!module){ S.text("No module written.","err"); return; }
+    S.text(`${sub === "vm-check" ? "VERIFIED" : "BUILT"} ${module.programId}.vmcoto-preview`,"ok");
+    S.text(`format       ${module.format}`);
+    S.text(`checksum     ${module.checksum}`);
+    S.text(`size         ${module.bytes} bytes`);
+    S.text(`capabilities ${module.capabilities.join(", ") || "none"}`);
+    S.text("Preview manifests are intentionally not wire-compatible with reference VM/Coto modules.","dim");
+    return;
+  }
+  if(sub === "targets"){
+    S.text("Reference compiler targets", "hd");
+    COTO_TARGETS.forEach(([target,description])=>S.out(`  <span class="ok">${esc(target.padEnd(20))}</span>${esc(description)}`));
+    return;
+  }
+  if(sub === "status" || sub === "subsystem" || sub === "version" || sub === "--version"){
+    S.out('<span class="hd">Coto Product Family / MiniOS Integration</span>');
+    S.out('  <span class="ok">Coto Language</span>   working v0 prototype · hosted subset active here');
+    S.out('  <span class="ok">Coto Compiler</span>   local C11 reference · MiniOS parser preview active');
+    S.out('  <span class="ok">Coto Shell</span>      Bash + PowerShell hybrid · local object pipeline preview');
+    S.out('  <span class="warn">OS/Coto Core</span>    early boot-verified kernel foundation');
+    S.out('  <span class="p3">Storage</span>         local browser state · no account · no network');
+    return;
+  }
+  S.text(`coto: unknown command '${sub}' (try 'coto help')`,"err");
+}
+cmd("coto", "Coto compiler/subsystem: coto help", (S,args) => cotoCli(S,args));
+cmd("ecosystem mini-coto", "Open the Coto Ecosystem", S => cotoCli(S,["ecosystem"]));
+cmd("check", "Check the saved Coto source", S => cotoCli(S,["check"]),["coto"]);
+cmd("run", "Run the saved Coto source", S => cotoCli(S,["run"]),["coto"]);
+cmd("build", "Build a VM/Coto preview manifest", S => cotoCli(S,["build"]),["coto"]);
+cmd("source", "Open Coto Compiler Lab", S => cotoCli(S,["open"]),["coto"]);
+cmd("samples", "List or load Coto samples", (S,args) => cotoCli(S,["sample",...args]),["coto"]);
+cmd("targets", "Show reference compiler targets", S => cotoCli(S,["targets"]),["coto"]);
+cmd("subsystem", "Show OS/Coto subsystem status", S => cotoCli(S,["status"]),["coto"]);
 cmd("explorer e", "Open a folder window", (S, args) => {
   const n = resolve(args.join(" ") || ".", S.cwd);
   if(!isFolder(n)){ S.text("Not a folder.", "err"); return; }
@@ -1340,7 +1576,7 @@ cmd("wallpaper wall bg", "Set the wallpaper: wallpaper <file|none> [fit|center|t
     S.text("(the file must sit next to index.html)", "dim");
 });
 cmd("export backup", "Dump your MiniOS data as JSON", (S) => {
-  openNotepad("__export__", JSON.stringify({ fs:state.fs, notes:state.notes, npp:state.npp }, null, 2), "Export.json");
+  openNotepad("__export__", JSON.stringify({ fs:state.fs, notes:state.notes, npp:state.npp, coto:state.coto }, null, 2), "Export.json");
   S.text("Opened export in notepad — copy it somewhere safe.", "ok");
 });
 cmd("neofetch winfetch about ver", "System info", (S) => {
@@ -1387,14 +1623,93 @@ cmd("reset factory-reset", "Wipe everything and start fresh", async (S) => {
   } else S.text("Cancelled.", "dim");
 });
 
+function runCotoPipeline(S:any, raw:string): boolean {
+  const stages = splitPipeline(raw);
+  if(stages.length < 2) return false;
+
+  const source = tokenize(stages[0]);
+  const sourceName = (source.shift() || "").toLowerCase();
+  if(!["ls","dir","gci","get-childitem","l"].includes(sourceName)){
+    S.text("cs: an object pipeline starts with ls or Get-ChildItem", "err");
+    return true;
+  }
+
+  const sourceTarget = source.filter(argument => !argument.startsWith("-"))[0] || ".";
+  const folder = resolve(sourceTarget, S.cwd);
+  if(!isFolder(folder)){
+    S.text(`Get-ChildItem: '${sourceTarget}' is not a folder.`, "err");
+    return true;
+  }
+
+  let objects = sortedChildren(folder);
+  for(const stage of stages.slice(1)){
+    const parts = tokenize(stage);
+    const stageName = (parts.shift() || "").toLowerCase();
+    const expression = parts.join(" ").trim();
+
+    if(["grep","where","select-string"].includes(stageName)){
+      if(!expression){ S.text(`${stageName}: missing filter text`, "err"); return true; }
+      const query = expression.toLowerCase();
+      objects = objects.filter(item => (item.name + " " + (isFolder(item) ? "folder" : item.url)).toLowerCase().includes(query));
+      continue;
+    }
+
+    if(["where-object","?"].includes(stageName)){
+      if(!expression){ S.text("Where-Object: use type=folder, type=link, or name=<text>", "warn"); return true; }
+      const typeMatch = expression.match(/(?:type|kind)?\s*(?:=|-eq)?\s*(folder|directory|dir|link|bookmark)\b/i);
+      if(typeMatch){
+        const wantsFolder = /^(folder|directory|dir)$/i.test(typeMatch[1]);
+        objects = objects.filter(item => isFolder(item) === wantsFolder);
+        continue;
+      }
+      const nameMatch = expression.match(/name\s*(?:=|~=|-like)?\s*\*?(.+?)\*?$/i);
+      const query = (nameMatch?.[1] || expression).toLowerCase();
+      objects = objects.filter(item => item.name.toLowerCase().includes(query));
+      continue;
+    }
+
+    if(["sort","sort-object"].includes(stageName)){
+      const property = parts.find(part => !part.startsWith("-"))?.toLowerCase() || "name";
+      const descending = parts.some(part => /^(?:-r|-descending)$/i.test(part));
+      objects.sort((a,b) => {
+        const left = property === "type" || property === "kind" ? (isFolder(a) ? "folder" : "link") : a.name;
+        const right = property === "type" || property === "kind" ? (isFolder(b) ? "folder" : "link") : b.name;
+        return left.localeCompare(right) * (descending ? -1 : 1);
+      });
+      continue;
+    }
+
+    if(["head","first","select-object"].includes(stageName)){
+      const firstIndex = parts.findIndex(part => /^-first$/i.test(part));
+      const amountText = stageName === "select-object" ? parts[firstIndex + 1] : parts[0];
+      const amount = Math.max(0, Math.min(100, parseInt(amountText || "10",10) || 10));
+      objects = objects.slice(0, amount);
+      continue;
+    }
+
+    if(["wc","measure","measure-object"].includes(stageName)){
+      S.out('<span class="p3">Count</span>  ' + objects.length);
+      return true;
+    }
+
+    S.text(`cs: unsupported pipeline stage '${stageName}'`, "err");
+    S.text("Try grep, Select-String, Where-Object, sort, Sort-Object, head, Select-Object -First, or Measure-Object.", "dim");
+    return true;
+  }
+
+  fmtCotoObjects(S, objects, folder);
+  return true;
+}
+
 function runCommand(S, line){
   const raw = line.trim();
   if(!raw) return;
+  if(S.shell === "coto" && runCotoPipeline(S, raw)) return;
   const parts = tokenize(raw);
   const name = parts[0].toLowerCase();
   const args = parts.slice(1);
   // "cd.." and "./name" niceties
-  const c = COMMANDS[name];
+  const c = COMMANDS[name] && (!COMMANDS[name].shells || COMMANDS[name].shells.includes(S.shell)) ? COMMANDS[name] : null;
   if(c) return c.run(S, args, raw);
   // maybe it's a bookmark name or url typed directly
   const direct = resolve(raw, S.cwd);
@@ -1408,46 +1723,272 @@ document.addEventListener("click", e => {
   if(t && t.dataset.url) go(t.dataset.url);
 });
 
+function safeMarkdownHref(value:string): string | null {
+  const trimmed = value.trim();
+  if(trimmed.startsWith("#")) return trimmed;
+  try{
+    const parsed = new URL(trimmed, location.href);
+    return ["http:","https:","mailto:"].includes(parsed.protocol) ? trimmed : null;
+  }catch{
+    return null;
+  }
+}
+
+function renderMarkdownInline(source:string): string {
+  const tokens:string[] = [];
+  const hold = (html:string) => `\u0000${tokens.push(html)-1}\u0000`;
+  let text = source
+    .replace(/`([^`\n]+)`/g, (_match,code) => hold(`<code>${esc(code)}</code>`))
+    .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (_match,label,url) => {
+      const href = safeMarkdownHref(url);
+      return href
+        ? hold(`<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`)
+        : `[${label}](${url})`;
+    });
+  text = esc(text)
+    .replace(/\*\*([^*\n]+)\*\*/g,"<strong>$1</strong>")
+    .replace(/__([^_\n]+)__/g,"<strong>$1</strong>")
+    .replace(/~~([^~\n]+)~~/g,"<del>$1</del>")
+    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g,"$1<em>$2</em>")
+    .replace(/(^|[^_])_([^_\n]+)_(?!_)/g,"$1<em>$2</em>");
+  return text.replace(/\u0000(\d+)\u0000/g,(_match,index) => tokens[Number(index)] || "");
+}
+
+function renderMarkdown(source:string): string {
+  const output:string[] = [];
+  const lines = source.replace(/\r\n?/g,"\n").split("\n");
+  let list:"ul"|"ol"|null = null;
+  let code:string[]|null = null;
+  let codeLanguage = "";
+  const closeList = () => { if(list){ output.push(`</${list}>`); list = null; } };
+
+  lines.forEach(line => {
+    const fence = line.match(/^\s*```\s*([\w+-]*)\s*$/);
+    if(fence){
+      closeList();
+      if(code){
+        const label = codeLanguage ? `<span>${esc(codeLanguage)}</span>` : "";
+        output.push(`<pre>${label}<code>${esc(code.join("\n"))}</code></pre>`);
+        code = null; codeLanguage = "";
+      }else{
+        code = []; codeLanguage = fence[1] || "";
+      }
+      return;
+    }
+    if(code){ code.push(line); return; }
+    if(!line.trim()){ closeList(); output.push(""); return; }
+
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    if(heading){ closeList(); const level=heading[1].length; output.push(`<h${level}>${renderMarkdownInline(heading[2])}</h${level}>`); return; }
+    if(/^\s*(?:---+|___+|\*\*\*+)\s*$/.test(line)){ closeList(); output.push("<hr>"); return; }
+    const quote = line.match(/^\s*>\s?(.*)$/);
+    if(quote){ closeList(); output.push(`<blockquote>${renderMarkdownInline(quote[1])}</blockquote>`); return; }
+
+    const unordered = line.match(/^\s*[-+*]\s+(.+)$/);
+    const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+    if(unordered || ordered){
+      const nextList:"ul"|"ol" = unordered ? "ul" : "ol";
+      if(list !== nextList){ closeList(); list = nextList; output.push(`<${list}>`); }
+      const item = (unordered || ordered)![1];
+      const task = item.match(/^\[([ xX])\]\s+(.+)$/);
+      output.push(task
+        ? `<li class="task"><input type="checkbox" disabled${task[1].toLowerCase()==="x" ? " checked" : ""}>${renderMarkdownInline(task[2])}</li>`
+        : `<li>${renderMarkdownInline(item)}</li>`);
+      return;
+    }
+
+    closeList();
+    output.push(`<p>${renderMarkdownInline(line)}</p>`);
+  });
+  closeList();
+  if(code) output.push(`<pre><code>${esc(code.join("\n"))}</code></pre>`);
+  return output.join("\n") || '<p class="empty-preview">Nothing to preview yet.</p>';
+}
+
 /* ============================================================
    12. Notepad
    ============================================================ */
 function openNotepad(key: string, seed?: string, title?: string){
-  const w = makeWindow({ title:(title || (key === "welcome" ? "Untitled" : key)) + " - Notepad", icon:ICONS.notepad, kind:"notepad", w:520, h:380 });
+  const markdownMode = key !== "__export__";
+  const rawName = title || (key === "welcome" ? "Untitled" : key);
+  const noteName = markdownMode && !/\.[a-z0-9]+$/i.test(rawName) ? rawName + ".md" : rawName;
+  const w = makeWindow({ title:noteName + " - Notepad", icon:ICONS.notepad, kind:"notepad", w:markdownMode ? 720 : 520, h:markdownMode ? 480 : 380 });
   const mb = el("div","menubar");
-  ["File","Edit","Help"].forEach(m => {
+  const toolbar = el("div","note-toolbar");
+  const workspace = el("div","note-workspace edit-only");
+  const ta = el("textarea","note in");
+  const preview = el("div","note-preview in");
+  const status = el("div","status");
+  const s1 = el("div"); s1.style.flex="1";
+  const s2 = el("div",null,markdownMode ? "Markdown" : "Text");
+  status.append(s1,s2);
+
+  ta.value = seed != null ? seed : (state.notes[key] || "");
+  ta.spellcheck = markdownMode;
+  ta.setAttribute("aria-label",markdownMode ? "Markdown source" : "Notepad text");
+  preview.tabIndex = 0;
+  preview.setAttribute("aria-label","Markdown preview");
+  workspace.append(ta,preview);
+
+  type NoteView = "edit"|"split"|"preview";
+  let viewMode:NoteView = "edit";
+  let flashTimer = 0;
+  let previewFrame = 0;
+  const viewButtons:Partial<Record<NoteView,HTMLButtonElement>> = {};
+  const store = () => { if(key !== "__export__"){ state.notes[key] = ta.value; save(); } };
+  const info = () => {
+    const words = ta.value.trim() ? ta.value.trim().split(/\s+/).length : 0;
+    return `${ta.value.length} chars · ${words} words · ${ta.value.split("\n").length} lines` + (key === "__export__" ? " · not saved" : " · autosaved");
+  };
+  const updatePreview = () => {
+    if(!markdownMode) return;
+    preview.innerHTML = renderMarkdown(ta.value);
+  };
+  const queuePreview = () => {
+    if(!markdownMode || viewMode === "edit") return;
+    if(previewFrame) cancelAnimationFrame(previewFrame);
+    previewFrame = requestAnimationFrame(() => { previewFrame = 0; updatePreview(); });
+  };
+  const flash = (message:string) => {
+    s1.textContent = message;
+    if(flashTimer) window.clearTimeout(flashTimer);
+    flashTimer = window.setTimeout(()=>{ s1.textContent = info(); }, 1400);
+  };
+  const changed = () => { store(); s1.textContent = info(); queuePreview(); };
+  const setView = (mode:NoteView) => {
+    viewMode = mode;
+    workspace.className = "note-workspace " + (mode === "edit" ? "edit-only" : mode === "preview" ? "preview-only" : "split");
+    (Object.keys(viewButtons) as NoteView[]).forEach(name => {
+      const button = viewButtons[name];
+      if(button) button.setAttribute("aria-pressed",String(name === mode));
+    });
+    if(mode !== "edit") updatePreview();
+    s2.textContent = mode === "edit" ? "Markdown" : mode[0].toUpperCase() + mode.slice(1);
+    if(mode !== "preview") setTimeout(()=>ta.focus(),0);
+  };
+
+  const replaceSelection = (before:string,after:string,placeholder:string) => {
+    const start=ta.selectionStart, end=ta.selectionEnd;
+    const selected=ta.value.slice(start,end) || placeholder;
+    ta.setRangeText(before + selected + after,start,end,"end");
+    ta.setSelectionRange(start + before.length,start + before.length + selected.length);
+    changed(); ta.focus();
+  };
+  const prefixLines = (prefix:string,strip?:RegExp) => {
+    const start=ta.value.lastIndexOf("\n",Math.max(0,ta.selectionStart-1))+1;
+    const nextBreak=ta.value.indexOf("\n",ta.selectionEnd);
+    const end=nextBreak < 0 ? ta.value.length : nextBreak;
+    const replacement=ta.value.slice(start,end).split("\n").map(line => prefix + (strip ? line.replace(strip,"") : line)).join("\n");
+    ta.setRangeText(replacement,start,end,"select");
+    changed(); ta.focus();
+  };
+  const insertLink = () => {
+    const start=ta.selectionStart, end=ta.selectionEnd;
+    const label=ta.value.slice(start,end) || "link text";
+    const url="https://example.com";
+    ta.setRangeText(`[${label}](${url})`,start,end,"end");
+    const urlStart=start + label.length + 3;
+    ta.setSelectionRange(urlStart,urlStart + url.length);
+    changed(); ta.focus();
+  };
+  const insertCode = () => {
+    const selected=ta.value.slice(ta.selectionStart,ta.selectionEnd);
+    selected.includes("\n") ? replaceSelection("```\n","\n```","code") : replaceSelection("`","`","code");
+  };
+  const downloadMarkdown = () => {
+    const blob=new Blob([ta.value],{type:"text/markdown;charset=utf-8"});
+    const url=URL.createObjectURL(blob);
+    const link=document.createElement("a"); link.href=url; link.download=noteName.replace(/[^a-z0-9._-]+/gi,"-") || "Untitled.md";
+    link.click(); setTimeout(()=>URL.revokeObjectURL(url),0); flash("Markdown downloaded.");
+  };
+
+  const formatting = {
+    heading:()=>prefixLines("# ",/^#{1,6}\s+/),
+    bold:()=>replaceSelection("**","**","bold text"),
+    italic:()=>replaceSelection("*","*","italic text"),
+    strike:()=>replaceSelection("~~","~~","struck text"),
+    bullet:()=>prefixLines("- ",/^[-+*]\s+/),
+    numbered:()=>prefixLines("1. ",/^\d+[.)]\s+/),
+    task:()=>prefixLines("- [ ] ",/^[-+*]\s+(?:\[[ xX]\]\s+)?/),
+    quote:()=>prefixLines("> ",/^>\s?/),
+    code:insertCode,
+    link:insertLink
+  };
+
+  const addTool = (label:string,titleText:string,action:()=>void) => {
+    const button=el("button",null,label); button.type="button"; button.title=titleText; button.setAttribute("aria-label",titleText); button.onclick=action; toolbar.appendChild(button); return button;
+  };
+  if(markdownMode){
+    addTool("H1","Heading",formatting.heading);
+    addTool("B","Bold (Ctrl+B)",formatting.bold).classList.add("strong");
+    addTool("I","Italic (Ctrl+I)",formatting.italic).classList.add("italic");
+    addTool("S","Strikethrough",formatting.strike).classList.add("strike");
+    toolbar.appendChild(el("span","sep"));
+    addTool("•","Bulleted list",formatting.bullet);
+    addTool("1.","Numbered list",formatting.numbered);
+    addTool("☐","Task list",formatting.task);
+    addTool("❯","Block quote",formatting.quote);
+    addTool("<>","Inline or fenced code",formatting.code);
+    addTool("🔗","Link",formatting.link);
+    toolbar.appendChild(el("span","spacer"));
+    (["edit","split","preview"] as NoteView[]).forEach(mode => {
+      const label=mode[0].toUpperCase()+mode.slice(1);
+      viewButtons[mode]=addTool(label,`${label} view`,()=>setView(mode));
+    });
+  }
+
+  const copyMarkdown = () => {
+    ta.select();
+    const done = (ok:boolean) => flash(ok ? (markdownMode ? "Copied Markdown." : "Copied text.") : "Could not copy — press Ctrl+C.");
+    if(navigator.clipboard && navigator.clipboard.writeText)
+      navigator.clipboard.writeText(ta.value).then(()=>done(true),()=>done(false));
+    else done(!!(document.execCommand && document.execCommand("copy")));
+  };
+  ["File","Edit",...(markdownMode ? ["Format","View"] : []),"Help"].forEach(m => {
     const s = el("span",null,m);
     s.onclick = () => {
       const r = s.getBoundingClientRect();
       if(m === "File") menu(r.left, r.bottom, [
         { label:"Save", action:()=>{ store(); flash("Saved."); } },
-        { label:"Select all & copy", action:()=>{
-            ta.select();
-            /* async Clipboard API needs no permission here; execCommand is the fallback */
-            const done = ok => flash(ok ? "Copied to the clipboard." : "Could not copy — press Ctrl+C.");
-            if(navigator.clipboard && navigator.clipboard.writeText)
-              navigator.clipboard.writeText(ta.value).then(()=>done(true), ()=>done(false));
-            else done(!!(document.execCommand && document.execCommand("copy")));
-          }},
+        { label:markdownMode ? "Copy Markdown" : "Select all & copy", action:copyMarkdown },
+        ...(markdownMode ? [{ label:"Download .md", action:downloadMarkdown }] : []),
         "-", { label:"Close", action:()=>w.close() }
       ]);
       else if(m === "Edit") menu(r.left, r.bottom, [
-        { label:"Clear", action:()=>{ ta.value=""; store(); } },
+        { label:"Select all", action:()=>{ ta.focus(); ta.select(); } },
+        { label:"Clear", action:()=>{ ta.value=""; changed(); } },
         { label:"Word wrap (always on)", disabled:true }
       ]);
-      else menu(r.left, r.bottom, [{ label:"About Notepad", action:()=>say(`${activeTheme.shortName} Notepad.\nText is stored in this browser only.`,"About") }]);
+      else if(m === "Format") menu(r.left,r.bottom,[
+        {label:"Heading",action:formatting.heading},{label:"Bold",action:formatting.bold},{label:"Italic",action:formatting.italic},
+        {label:"Strikethrough",action:formatting.strike},"-",{label:"Bulleted list",action:formatting.bullet},
+        {label:"Numbered list",action:formatting.numbered},{label:"Task list",action:formatting.task},
+        {label:"Block quote",action:formatting.quote},{label:"Code",action:formatting.code},{label:"Link",action:formatting.link}
+      ]);
+      else if(m === "View") menu(r.left,r.bottom,[
+        {label:"Edit",action:()=>setView("edit")},{label:"Split",action:()=>setView("split")},{label:"Preview",action:()=>setView("preview")}
+      ]);
+      else menu(r.left, r.bottom, markdownMode ? [
+        { label:"Markdown syntax", action:()=>say("# Heading\n**bold**  *italic*  ~~strike~~\n- list  1. numbered  - [ ] task\n> quote\n`inline code` or fenced code\n[link text](https://example.com)","Markdown syntax") },
+        { label:"About Notepad", action:()=>say(`${activeTheme.shortName} Notepad.\nMarkdown text is stored in this browser only.`,"About") }
+      ] : [
+        { label:"About Notepad", action:()=>say(`${activeTheme.shortName} Notepad.\nText is stored in this browser only.`,"About") }
+      ]);
     };
     mb.appendChild(s);
   });
-  const ta = el("textarea","note in");
-  ta.value = seed != null ? seed : (state.notes[key] || "");
-  ta.spellcheck = false;
-  const status = el("div","status"); const s1 = el("div"); s1.style.flex="1"; status.append(s1);
-  w.body.append(mb, ta, status);
-  const store = () => { if(key !== "__export__"){ state.notes[key] = ta.value; save(); } };
-  const flash = t => { s1.textContent = t; setTimeout(()=>{ s1.textContent = info(); }, 1400); };
-  const info = () => ta.value.length + " chars · " + ta.value.split("\n").length + " lines" + (key === "__export__" ? " · not saved" : " · autosaved");
-  ta.addEventListener("input", () => { store(); s1.textContent = info(); });
+  w.body.appendChild(mb);
+  if(markdownMode) w.body.appendChild(toolbar);
+  w.body.append(workspace,status);
+  ta.addEventListener("input",changed);
+  ta.addEventListener("keydown",event => {
+    if(!markdownMode || !event.ctrlKey) return;
+    if(event.key.toLowerCase() === "b"){ event.preventDefault(); formatting.bold(); }
+    else if(event.key.toLowerCase() === "i"){ event.preventDefault(); formatting.italic(); }
+    else if(event.altKey && event.key.toLowerCase() === "p"){ event.preventDefault(); setView(viewMode === "edit" ? "split" : "edit"); }
+  });
   s1.textContent = info();
+  if(markdownMode) setView("edit");
   setTimeout(()=>ta.focus(), 30);
   return w;
 }
@@ -1595,10 +2136,10 @@ function openMiniEditor(){
     setTimeout(()=>URL.revokeObjectURL(url),1000); flash("Downloaded " + safeName);
   };
   const fileInput = el("input","npp-file-input");
-  fileInput.type = "file"; fileInput.accept = ".txt,.md,.markdown,.js,.mjs,.cjs,.html,.htm,.css,.json,.xml,.csv,.log,.sh,.ps1,text/*";
+  fileInput.type = "file"; fileInput.accept = ".txt,.md,.markdown,.coto,.js,.mjs,.cjs,.html,.htm,.css,.json,.xml,.csv,.log,.sh,.ps1,text/*";
   const languageForName = name => {
     const ext = (name.split(".").pop() || "").toLowerCase();
-    return ({js:"JavaScript",mjs:"JavaScript",cjs:"JavaScript",html:"HTML",htm:"HTML",css:"CSS",json:"JSON",md:"Markdown",markdown:"Markdown",sh:"Shell",ps1:"PowerShell"})[ext] || "Plain text";
+    return ({coto:"Coto",js:"JavaScript",mjs:"JavaScript",cjs:"JavaScript",html:"HTML",htm:"HTML",css:"CSS",json:"JSON",md:"Markdown",markdown:"Markdown",sh:"Shell",ps1:"PowerShell"})[ext] || "Plain text";
   };
   const loadFile = async file => {
     if(!file) return;
@@ -1644,7 +2185,7 @@ function openMiniEditor(){
   const bWrap = el("button",null,"Wrap"); bWrap.onclick = () => setWrap(!doc.wrap);
   ([[bNew,"New document (Ctrl+N)"],[bOpen,"Open a text file (Ctrl+O)"],[bSave,"Save in this browser (Ctrl+S)"],[bDownload,"Download a copy"],[bFind,"Find text (Ctrl+F)"],[bWrap,"Toggle word wrap"]] as Array<[HTMLButtonElement,string]>).forEach(([button,title])=>button.title=title);
   const language = el("select");
-  const LANGUAGES = ["Plain text","JavaScript","HTML","CSS","JSON","Markdown","Shell","PowerShell"];
+  const LANGUAGES = ["Plain text","Coto","JavaScript","HTML","CSS","JSON","Markdown","Shell","PowerShell"];
   LANGUAGES.forEach(name => { const o=el("option",null,name); o.value=name; if(name===doc.language)o.selected=true; language.appendChild(o); });
   const setLanguage = name => { doc.language=name; language.value=name; langStatus.textContent=name; saveNow(); flash(name + " mode"); };
   language.onchange = () => setLanguage(language.value);
@@ -1691,7 +2232,366 @@ function openMiniEditor(){
 }
 
 /* ============================================================
-   13. Settings
+   13. Coto Ecosystem
+   ============================================================ */
+type CotoView = "home" | "compiler" | "capture" | "studio" | "system";
+
+const COTO_ACCENTS: Record<MiniOSState["coto"]["accent"], { name:string; note:string }> = {
+  orbit: { name:"Orbit violet", note:"Curious and composed" },
+  coral: { name:"Human coral", note:"Warm and energetic" },
+  mint:  { name:"Fresh mint", note:"Clear and restorative" }
+};
+
+function openCoto(initialView: CotoView = "home"){
+  const existing = wins.find(x => x.kind === "coto");
+  if(existing){
+    focusWin(existing);
+    existing.api.openView?.(initialView);
+    return existing;
+  }
+
+  const w = makeWindow({ title:"Coto Ecosystem — OS/Coto Subsystem Preview", icon:ICONS.coto, kind:"coto", w:900, h:610 });
+  w.node.classList.add("coto-window");
+  const app = el("div","coto-app");
+  app.dataset.accent = state.coto.accent;
+
+  const sidebar = el("aside","coto-sidebar");
+  const brand = el("div","coto-brand");
+  const brandIcon = el("img"); brandIcon.src = ICONS.coto; brandIcon.alt = "";
+  const brandCopy = el("span"); brandCopy.append(el("strong",null,"coto"),el("small",null,"subsystem preview"));
+  brand.append(brandIcon,brandCopy);
+
+  const nav = el("nav","coto-nav");
+  nav.setAttribute("aria-label","Coto sections");
+  const navItems: Array<{ view:CotoView; icon:string; label:string }> = [
+    { view:"home", icon:"⌂", label:"Home" },
+    { view:"compiler", icon:"›_", label:"Compiler" },
+    { view:"capture", icon:"+", label:"Capture" },
+    { view:"studio", icon:"◇", label:"Studio" },
+    { view:"system", icon:"◎", label:"System" }
+  ];
+  const navButtons = new Map<CotoView,HTMLButtonElement>();
+  navItems.forEach(item => {
+    const button = el("button","coto-nav-button"); button.type = "button";
+    button.append(el("span","coto-nav-icon",item.icon),el("span",null,item.label));
+    button.onclick = () => setView(item.view);
+    navButtons.set(item.view,button);
+    nav.appendChild(button);
+  });
+  const localStatus = el("div","coto-local-status");
+  localStatus.append(el("i"),el("span",null,"Saved on this device"));
+  sidebar.append(brand,nav,localStatus);
+
+  const main = el("main","coto-main");
+  const topbar = el("header","coto-topbar");
+  const heading = el("div");
+  const eyebrow = el("div","coto-eyebrow","COTO ECOSYSTEM");
+  const viewTitle = el("div","coto-view-title","Home");
+  heading.append(eyebrow,viewTitle);
+  const localPill = el("span","coto-local-pill");
+  localPill.append(el("i"),document.createTextNode(" LOCAL"));
+  topbar.append(heading,localPill);
+  const surface = el("div","coto-surface");
+  main.append(topbar,surface);
+  app.append(sidebar,main);
+  w.body.appendChild(app);
+
+  const actionButton = (label:string, className:string, action:()=>void) => {
+    const button = el("button",className,label); button.type = "button"; button.onclick = action; return button;
+  };
+  const sectionHeading = (title:string, note:string) => {
+    const wrap = el("div","coto-section-heading");
+    const copy = el("div"); copy.append(el("h3",null,title),el("p",null,note));
+    wrap.appendChild(copy); return wrap;
+  };
+  const moduleCard = (mark:string, title:string, copy:string, detail:string, view:CotoView) => {
+    const card = el("article","coto-module-card");
+    const top = el("div","coto-module-top");
+    top.append(el("span","coto-module-mark",mark),el("span","coto-module-detail",detail));
+    const open = actionButton("Open →","coto-text-button",()=>setView(view));
+    card.append(top,el("h4",null,title),el("p",null,copy),open);
+    return card;
+  };
+
+  let compilerTranscript = "Ready. Check, run, or build the saved Coto source.";
+  let compilerTone: "idle"|"ok"|"error" = "idle";
+
+  const renderHome = () => {
+    const page = el("div","coto-page coto-home");
+    const hero = el("section","coto-hero");
+    const heroCopy = el("div","coto-hero-copy");
+    heroCopy.append(
+      el("span","coto-kicker","OS/COTO SUBSYSTEM PREVIEW / 01"),
+      el("h2",null,"A small window into the Coto platform."),
+      el("p",null,"Explore the language, compiler workflow, shell, and local-first ecosystem together inside MiniOS."),
+    );
+    const heroActions = el("div","coto-actions");
+    heroActions.append(
+      actionButton("Try the compiler","coto-button coto-button-primary",()=>setView("compiler")),
+      actionButton("Open Coto Shell","coto-button coto-button-quiet",()=>openTerminal("coto"))
+    );
+    heroCopy.appendChild(heroActions);
+    const orbit = el("div","coto-orbit");
+    orbit.setAttribute("aria-hidden","true");
+    orbit.append(el("i"),el("i"),el("i"),el("b",null,"C"));
+    hero.append(heroCopy,orbit);
+
+    const stats = el("section","coto-stats");
+    const openCount = state.coto.captures.filter(item => !item.done).length;
+    [
+      [String(openCount).padStart(2,"0"),"open ideas"],
+      [SHELLS[state.shell].short,"current shell"],
+      ["LOCAL","storage mode"]
+    ].forEach(([value,label]) => {
+      const stat = el("div","coto-stat"); stat.append(el("strong",null,value),el("span",null,label)); stats.appendChild(stat);
+    });
+
+    const heading = sectionHeading("The mini ecosystem","A connected taste of the compiler, language, shell, and product system.");
+    const modules = el("section","coto-module-grid");
+    modules.append(
+      moduleCard("›_","Compiler Lab","Edit, check, and run a real hosted Coto subset.",state.coto.sourceName,"compiler"),
+      moduleCard("+","Capture","Save the thought before it disappears.",`${state.coto.captures.length} saved`,"capture"),
+      moduleCard("◇","Studio","Try the color, type, and component rhythm.",COTO_ACCENTS[state.coto.accent].name,"studio"),
+      moduleCard("◎","System","See the principles holding everything together.","4 principles","system")
+    );
+    page.append(hero,stats,heading,modules);
+    return page;
+  };
+
+  const renderCompiler = () => {
+    const page=el("div","coto-page coto-compiler-page");
+    const intro=sectionHeading("Compiler Lab","A browser-local host for the Coto v0 structure, FIRE/HOLD values, display, checked ints, and VM preview manifests.");
+    const openShell=actionButton("Open Coto Shell","coto-button coto-button-quiet",()=>openTerminal("coto"));
+    intro.appendChild(openShell);
+
+    const toolbar=el("div","coto-compiler-toolbar");
+    const sampleLabel=el("label"); sampleLabel.appendChild(el("span",null,"Sample"));
+    const sampleSelect=el("select");
+    Object.entries(COTO_SAMPLES).forEach(([key,sample])=>{ const option=el("option",null,sample.label); option.value=key; sampleSelect.appendChild(option); });
+    sampleSelect.value=Object.entries(COTO_SAMPLES).find(([,sample])=>sample.name===state.coto.sourceName)?.[0] || "";
+    sampleLabel.appendChild(sampleSelect);
+    const checkButton=actionButton("Check","coto-button coto-button-quiet",()=>execute("check"));
+    const runButton=actionButton("Run","coto-button coto-button-primary",()=>execute("run"));
+    const buildButton=actionButton("Build VM preview","coto-button coto-button-quiet",()=>execute("build"));
+    toolbar.append(sampleLabel,checkButton,runButton,buildButton);
+
+    const workspace=el("div","coto-compiler-workspace");
+    const editorPanel=el("section","coto-code-panel");
+    const editorHead=el("div","coto-code-head");
+    const fileName=el("input","coto-file-name"); fileName.type="text"; fileName.value=state.coto.sourceName; fileName.maxLength=80; fileName.setAttribute("aria-label","Coto source file name");
+    editorHead.append(el("span",null,"SOURCE"),fileName);
+    const source=el("textarea","coto-source"); source.value=state.coto.source; source.spellcheck=false; source.wrap="off"; source.setAttribute("aria-label","Coto source editor");
+    editorPanel.append(editorHead,source);
+
+    const consolePanel=el("section","coto-code-panel coto-console-panel");
+    const consoleHead=el("div","coto-code-head");
+    const status=el("span","coto-compiler-status " + compilerTone,compilerTone === "ok" ? "PASSED" : compilerTone === "error" ? "FAILED" : "LOCAL PREVIEW");
+    consoleHead.append(el("span",null,"DIAGNOSTICS / OUTPUT"),status);
+    const output=el("pre","coto-compiler-output",compilerTranscript);
+    consolePanel.append(consoleHead,output);
+    workspace.append(editorPanel,consolePanel);
+
+    const syncSource=()=>{
+      state.coto.source=source.value;
+      state.coto.sourceName=(fileName.value.trim() || "UNTITLED.coto").replace(/[^A-Za-z0-9._-]/g,"-");
+      if(!state.coto.sourceName.toLowerCase().endsWith(".coto")) state.coto.sourceName += ".coto";
+      save();
+    };
+    function execute(mode:"check"|"run"|"build"){
+      syncSource();
+      const result=compileCoto(state.coto.source);
+      const lines:string[]=[`${mode.toUpperCase()} ${state.coto.sourceName}`,`${result.programId} · ${result.instructions} instruction(s)`];
+      if(result.diagnostics.length){
+        lines.push("");
+        result.diagnostics.forEach(item=>lines.push(`${item.severity.toUpperCase()} ${item.code} ${item.line}:${item.column}  ${item.message}`));
+      }else lines.push("","No diagnostics. Zero Exception check passed.");
+      if(result.ok && mode === "run"){
+        lines.push("","--- PROGRAM OUTPUT ---",result.output.replace(/\n$/,"") || "(no display output)");
+        result.priorityEvents.forEach(event=>lines.push(`makefirst → ${event}`));
+        lines.push(`RETURN-CODE ${result.returnCode}`);
+      }
+      if(result.ok && mode === "build"){
+        const module=buildCotoModule(state.coto.source,result);
+        lines.push("","--- VM PREVIEW MANIFEST ---",JSON.stringify(module,null,2),"","Not wire-compatible with reference VM/Coto modules.");
+      }
+      compilerTone=result.ok ? "ok" : "error";
+      compilerTranscript=lines.join("\n");
+      output.textContent=compilerTranscript;
+      status.className="coto-compiler-status " + compilerTone;
+      status.textContent=result.ok ? (mode === "run" ? "RETURN " + result.returnCode : "PASSED") : "FAILED";
+    }
+    source.addEventListener("input",syncSource); fileName.addEventListener("change",syncSource);
+    sampleSelect.onchange=()=>{
+      const sample=COTO_SAMPLES[sampleSelect.value];
+      if(!sample) return;
+      source.value=sample.source; fileName.value=sample.name;
+      syncSource(); compilerTone="idle"; compilerTranscript=`Loaded ${sample.name}. Ready to check or run.`;
+      output.textContent=compilerTranscript; status.className="coto-compiler-status idle"; status.textContent="LOCAL PREVIEW";
+      source.focus();
+    };
+
+    const reference=el("section","coto-language-reference");
+    [
+      ["STRUCTURE","IDENTIFICATION DIVISION.\nPROCEDURE DIVISION."],
+      ["VALUES","int · string · bool\nFIRE · HOLD"],
+      ["RUNTIME","display(…) · return\nmakefirst(…)"],
+      ["PORTABLE","vm-build · vm-check\nvm-run · VM/Coto 2.0"]
+    ].forEach(([label,copy])=>{ const card=el("article"); card.append(el("strong",null,label),el("pre",null,copy)); reference.appendChild(card); });
+    page.append(intro,toolbar,workspace,reference);
+    return page;
+  };
+
+  const renderCapture = () => {
+    const page = el("div","coto-page");
+    const intro = sectionHeading("Capture","A lightweight inbox for thoughts worth keeping.");
+    const tools = el("div","coto-inline-actions");
+    const exportCapture = actionButton("Send to Notepad","coto-button coto-button-quiet",() => {
+      const lines = state.coto.captures.map(item => `${item.done ? "[x]" : "[ ]"} ${item.text}`);
+      state.notes["coto-capture"] = `Coto Capture\n============\n\n${lines.join("\n") || "No captured ideas yet."}\n`;
+      save();
+      openNotepad("coto-capture",undefined,"Coto Capture");
+    });
+    const clearDone = actionButton("Clear completed","coto-text-button",() => {
+      state.coto.captures = state.coto.captures.filter(item => !item.done);
+      save(); render();
+    });
+    clearDone.disabled = !state.coto.captures.some(item => item.done);
+    tools.append(exportCapture,clearDone);
+    intro.appendChild(tools);
+
+    const form = el("form","coto-capture-form");
+    const input = el("input"); input.type = "text"; input.maxLength = 140;
+    input.placeholder = "What do you want to remember?";
+    input.setAttribute("aria-label","New Coto idea");
+    const add = el("button","coto-button coto-button-primary","Add idea"); add.type = "submit";
+    form.append(input,add);
+    form.onsubmit = event => {
+      event.preventDefault();
+      const text = input.value.trim();
+      if(!text) return;
+      state.coto.captures.unshift({ id:nid(), text, done:false, createdAt:Date.now() });
+      save(); render();
+      setTimeout(()=>surface.querySelector<HTMLInputElement>(".coto-capture-form input")?.focus(),0);
+    };
+
+    const list = el("section","coto-capture-list");
+    if(!state.coto.captures.length){
+      const empty = el("div","coto-empty");
+      empty.append(el("span",null,"○"),el("strong",null,"Room for a new thought"),el("p",null,"Your captures stay here, on this device."));
+      list.appendChild(empty);
+    }else{
+      state.coto.captures.forEach(item => {
+        const row = el("article","coto-capture-item" + (item.done ? " done" : ""));
+        const check = el("button","coto-check",item.done ? "✓" : ""); check.type = "button";
+        check.title = item.done ? "Mark as open" : "Mark as complete";
+        check.setAttribute("aria-label",`${check.title}: ${item.text}`);
+        check.onclick = () => { item.done = !item.done; save(); render(); };
+        const copy = el("div","coto-capture-copy");
+        const date = new Date(item.createdAt || Date.now()).toLocaleDateString(undefined,{ month:"short", day:"numeric" });
+        copy.append(el("strong",null,item.text),el("small",null,`${item.done ? "Completed" : "Captured"} · ${date}`));
+        const remove = el("button","coto-remove","×"); remove.type = "button"; remove.title = "Delete idea";
+        remove.setAttribute("aria-label",`Delete: ${item.text}`);
+        remove.onclick = () => { state.coto.captures = state.coto.captures.filter(x => x.id !== item.id); save(); render(); };
+        row.append(check,copy,remove); list.appendChild(row);
+      });
+    }
+    page.append(intro,form,list);
+    return page;
+  };
+
+  const renderStudio = () => {
+    const page = el("div","coto-page");
+    page.appendChild(sectionHeading("Coto Studio","A small, interactive sample of the Coto design language."));
+
+    const palettePanel = el("section","coto-panel");
+    palettePanel.append(el("span","coto-panel-label","ACCENT SYSTEM"),el("h3",null,"Choose the energy"),el("p",null,"Color changes the character, while the structure stays familiar."));
+    const palette = el("div","coto-palette");
+    (Object.keys(COTO_ACCENTS) as MiniOSState["coto"]["accent"][]).forEach(accent => {
+      const option = el("button","coto-accent-option" + (state.coto.accent === accent ? " selected" : "")); option.type = "button";
+      const swatch = el("span","coto-accent-swatch"); swatch.dataset.swatch = accent;
+      const copy = el("span"); copy.append(el("strong",null,COTO_ACCENTS[accent].name),el("small",null,COTO_ACCENTS[accent].note));
+      option.append(swatch,copy);
+      option.setAttribute("aria-pressed",state.coto.accent === accent ? "true" : "false");
+      option.onclick = () => { state.coto.accent = accent; app.dataset.accent = accent; save(); render(); };
+      palette.appendChild(option);
+    });
+    palettePanel.appendChild(palette);
+
+    const showcase = el("section","coto-showcase-grid");
+    const typePanel = el("article","coto-panel coto-type-panel");
+    typePanel.append(el("span","coto-panel-label","TYPE RHYTHM"),el("div","coto-type-display","Make space\nfor meaning."),el("p",null,"A confident headline, compact labels, and relaxed reading text create a clear path through the interface."));
+    const componentPanel = el("article","coto-panel");
+    componentPanel.append(el("span","coto-panel-label","COMPONENTS"),el("h3",null,"Soft edges, clear actions"));
+    const demo = el("div","coto-component-demo");
+    const demoInput = el("input"); demoInput.type = "text"; demoInput.placeholder = "A useful little thought"; demoInput.setAttribute("aria-label","Coto component preview");
+    const badge = el("span","coto-demo-badge","IN PROGRESS");
+    const progress = el("span","coto-demo-progress"); progress.appendChild(el("i"));
+    const demoActions = el("div","coto-actions");
+    demoActions.append(actionButton("Continue","coto-button coto-button-primary",()=>{}),actionButton("Later","coto-button coto-button-quiet",()=>{}));
+    demo.append(badge,demoInput,progress,demoActions); componentPanel.appendChild(demo);
+    showcase.append(typePanel,componentPanel);
+    page.append(palettePanel,showcase);
+    return page;
+  };
+
+  const renderSystem = () => {
+    const page = el("div","coto-page");
+    const manifesto = el("section","coto-manifesto");
+    const mark = el("div","coto-manifesto-mark","C");
+    const copy = el("div");
+    copy.append(el("span","coto-kicker","THE COTO SYSTEM"),el("h2",null,"Designed to feel clear before it feels clever."),el("p",null,"Coto connects calm surfaces, expressive details, and useful defaults into one recognizable experience."));
+    manifesto.append(mark,copy);
+
+    const principles = el("section","coto-principles");
+    [
+      ["01","Warm structure","Strong hierarchy without coldness or clutter."],
+      ["02","Clear rhythm","Space and type lead the eye before decoration does."],
+      ["03","Local by default","The experience stays useful without an account or network."],
+      ["04","Playful restraint","Personality appears in small, intentional moments."]
+    ].forEach(([number,title,description]) => {
+      const card = el("article","coto-principle");
+      card.append(el("span",null,number),el("h3",null,title),el("p",null,description)); principles.appendChild(card);
+    });
+
+    const architecture = el("section","coto-architecture");
+    const archCopy = el("div"); archCopy.append(el("strong",null,"OS/Coto Subsystem Preview is truly part of MiniOS."),el("p",null,"Native DOM · TypeScript · local compiler host · local storage · no external services"));
+    architecture.append(archCopy,actionButton("Open Compiler Lab","coto-button coto-button-primary",()=>setView("compiler")));
+    const productStatus=el("section","coto-product-status");
+    [
+      ["ACTIVE","Coto Language","Working v0 reference; hosted MiniOS subset available."],
+      ["ACTIVE","Coto Compiler","Local C11 prototype; interactive MiniOS parser preview."],
+      ["PREVIEW","Coto Shell","Bash flow, PowerShell verbs, and a lightweight local object pipeline."],
+      ["FOUNDATION","OS/Coto Core","Boot-verified early kernel work; not yet a usable operating system."]
+    ].forEach(([badge,title,note])=>{ const row=el("article"); row.append(el("span",null,badge),el("div",null)); row.lastElementChild.append(el("strong",null,title),el("p",null,note)); productStatus.appendChild(row); });
+    page.append(manifesto,principles,productStatus,architecture);
+    return page;
+  };
+
+  const titles: Record<CotoView,string> = { home:"Home", compiler:"Compiler Lab", capture:"Capture", studio:"Studio", system:"System" };
+  let currentView: CotoView = initialView;
+  function render(){
+    viewTitle.textContent = titles[currentView];
+    navButtons.forEach((button,view) => {
+      const selected = view === currentView;
+      button.classList.toggle("selected",selected);
+      if(selected) button.setAttribute("aria-current","page"); else button.removeAttribute("aria-current");
+    });
+    surface.replaceChildren(
+      currentView === "capture" ? renderCapture() :
+      currentView === "compiler" ? renderCompiler() :
+      currentView === "studio" ? renderStudio() :
+      currentView === "system" ? renderSystem() : renderHome()
+    );
+  }
+  function setView(view:CotoView){ currentView = view; render(); }
+
+  w.api.openView = setView;
+  render();
+  return w;
+}
+
+/* ============================================================
+   14. Settings
    ============================================================ */
 function openSettings(){
   const ex = wins.find(w => w.kind === "settings");
@@ -1728,12 +2628,12 @@ function openSettings(){
   Object.keys(SHELLS).forEach(k => {
     const lab = el("label");
     const r = el("input"); r.type="radio"; r.name="shell"; r.value=k; r.checked = state.shell === k;
-    r.onchange = () => { state.shell = k as MiniOSState["shell"]; save(); applyChrome(); };
+    r.onchange = () => { state.shell = k as MiniOSState["shell"]; save(); applyChrome(); renderIcons(); };
     lab.append(r, el("span",null,SHELLS[k].label));
     rowShell.appendChild(lab);
   });
   fsShell.appendChild(rowShell);
-  fsShell.appendChild(el("div","hint","New terminals start in this shell. Inside a terminal you can switch any time with: shell bash"));
+  fsShell.appendChild(el("div","hint","New terminals start in this shell. Switch any time with: shell bash, shell zsh, shell powershell, or shell coto (CS)."));
   box.appendChild(fsShell);
 
   // search
@@ -1891,7 +2791,7 @@ function openSettings(){
   const fsData = el("fieldset"); fsData.appendChild(el("legend",null,"Your data"));
   const r5 = el("div","row");
   const bExp = el("button",null,"Export…");
-  bExp.onclick = () => openNotepad("__export__", JSON.stringify({ fs:state.fs, notes:state.notes, npp:state.npp }, null, 2), "Export.json");
+  bExp.onclick = () => openNotepad("__export__", JSON.stringify({ fs:state.fs, notes:state.notes, npp:state.npp, coto:state.coto }, null, 2), "Export.json");
   const bImp = el("button",null,"Import…");
   bImp.onclick = async () => {
     const r = await dialog({ title:"Import", fields:[{key:"json",label:"Paste an exported JSON:",value:"",type:"textarea"}] });
@@ -1902,6 +2802,11 @@ function openSettings(){
       state.fs = data.fs;
       if(data.notes) state.notes = data.notes;
       if(data.npp) state.npp = data.npp;
+      if(data.coto){
+        const accent = ["orbit","coral","mint"].includes(data.coto.accent) ? data.coto.accent : state.coto.accent;
+        const captures = Array.isArray(data.coto.captures) ? data.coto.captures : state.coto.captures;
+        state.coto = { ...state.coto, ...data.coto, accent, captures };
+      }
       reindex(); save(); refreshAll();
       say("Import complete.","Import");
     }catch(e){ say("That JSON could not be read:\n" + e.message, "Import failed"); }
@@ -2073,12 +2978,15 @@ function openHelp(){
     </fieldset>
     <fieldset><legend>Terminal</legend>
       <div class="hint">
-        Pick your shell in Settings, or type <kbd>shell bash</kbd> / <kbd>shell zsh</kbd> / <kbd>shell powershell</kbd>.<br><br>
+        Pick your shell in Settings, or type <kbd>shell bash</kbd> / <kbd>shell zsh</kbd> / <kbd>shell powershell</kbd> / <kbd>shell coto</kbd>.<br><br>
+        <b>Coto subsystem:</b> <kbd>coto help</kbd> <kbd>coto open</kbd> <kbd>coto check</kbd> <kbd>coto run</kbd> <kbd>coto build</kbd> <kbd>coto status</kbd><br>
+        Coto Shell blends Bash flow with PowerShell verbs and structured output. Try <kbd>aliases</kbd>, <kbd>ls | grep dev</kbd>, or <kbd>Get-ChildItem | Where-Object type=folder</kbd>.<br>
+        Compiler Lab runs a safe browser-hosted subset inspired by the working Coto v0 reference compiler.<br><br>
         <b>Getting around:</b> <kbd>ls</kbd> <kbd>cd Dev</kbd> <kbd>cd ..</kbd> <kbd>pwd</kbd> <kbd>tree</kbd><br>
         <b>Using links:</b> <kbd>open github</kbd> <kbd>cat github</kbd> <kbd>grep hacker</kbd> <kbd>search rust traits</kbd><br>
         <b>Editing:</b> <kbd>mkdir Recipes</kbd> <kbd>add Docs docs.claude.com</kbd> <kbd>mv old new</kbd> <kbd>rm -r Old</kbd><br>
         <b>Looks:</b> <kbd>wallpaper logo fit 45%</kbd> <kbd>wallpaper none</kbd> <kbd>wallpaper tile</kbd><br>
-        <b>Extras:</b> <kbd>neofetch</kbd> <kbd>history</kbd> <kbd>notepad</kbd> <kbd>minieditor</kbd> <kbd>export</kbd> <kbd>import-browser</kbd> <kbd>help</kbd><br><br>
+        <b>Extras:</b> <kbd>coto</kbd> <kbd>neofetch</kbd> <kbd>history</kbd> <kbd>notepad</kbd> <kbd>minieditor</kbd> <kbd>export</kbd> <kbd>import-browser</kbd> <kbd>help</kbd><br><br>
         PowerShell names work too — <kbd>Get-ChildItem</kbd>, <kbd>Set-Location</kbd>, <kbd>Remove-Item</kbd>, <kbd>cls</kbd>.
         <kbd>Tab</kbd> completes, <kbd>↑</kbd>/<kbd>↓</kbd> walks history, <kbd>Ctrl+L</kbd> clears.
       </div>
@@ -2143,8 +3051,10 @@ function buildStart(){
     ([['Terminal — PowerShell', ICONS.terminal, ()=>openTerminal("powershell")],
      ["Terminal — Bash", ICONS.bash, ()=>openTerminal("bash")],
      ["Terminal — Zsh", ICONS.zsh, ()=>openTerminal("zsh")],
+     ["Coto Shell (CS) — Bash + PowerShell", ICONS.cotosh, ()=>openTerminal("coto")],
      ["Notepad", ICONS.notepad, ()=>openNotepad("welcome")],
      ["MiniEditor", ICONS.npp, ()=>openMiniEditor()],
+     ["Coto Ecosystem", ICONS.coto, ()=>openCoto()],
      [activeTheme.computerName, ICONS.computer, ()=>openExplorer(state.fs)]
     ] as Array<[string,string,()=>unknown]>).forEach(([l,ic,a]) => s.appendChild(mkItem(l, ic, a)));
   }));
@@ -2271,16 +3181,57 @@ $("#today-daily").onclick = () => {
 };
 $("#today-note").onclick = () => openNotepad("welcome");
 
+const CLOCK_MINUTE_MS = 60_000;
+const clockTimeFormat = new Intl.DateTimeFormat(undefined, {
+  hour:"numeric",
+  minute:"2-digit"
+});
+const clockDateFormat = new Intl.DateTimeFormat(undefined, {
+  month:"numeric",
+  day:"numeric",
+  year:"2-digit"
+});
+const clockLabelFormat = new Intl.DateTimeFormat(undefined, {
+  weekday:"long",
+  month:"long",
+  day:"numeric",
+  year:"numeric",
+  hour:"numeric",
+  minute:"2-digit",
+  timeZoneName:"short"
+});
+let clockTimer: number | undefined;
+
 function clock(){
   const d = new Date();
-  const h = d.getHours(), ampm = h >= 12 ? "PM" : "AM";
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  $("#clock").textContent = h12 + ":" + two(d.getMinutes()) + " " + ampm;
-  $("#clock").title = d.toDateString();
-  $("#tray-date").textContent = (d.getMonth()+1) + "/" + d.getDate() + "/" + String(d.getFullYear()).slice(-2);
+  const label = clockLabelFormat.format(d);
+  const clockElement = $("#clock");
+  const dateElement = $("#tray-date");
+
+  clockElement.textContent = clockTimeFormat.format(d).replace(/[\u00a0\u202f]/g, " ");
+  dateElement.textContent = clockDateFormat.format(d);
+  clockElement.title = label;
+  dateElement.title = label;
+  $("#tray-time").setAttribute("aria-label", label);
   updateToday(d);
 }
-setInterval(clock, 10000); clock();
+
+function scheduleClock(){
+  if (clockTimer !== undefined) window.clearTimeout(clockTimer);
+  clock();
+  if (document.hidden) {
+    clockTimer = undefined;
+    return;
+  }
+
+  // Stay locked to the system's minute boundary instead of accumulating interval drift.
+  const untilNextMinute = CLOCK_MINUTE_MS - (Date.now() % CLOCK_MINUTE_MS);
+  clockTimer = window.setTimeout(scheduleClock, untilNextMinute + 25);
+}
+
+scheduleClock();
+window.addEventListener("focus", scheduleClock);
+document.addEventListener("visibilitychange", scheduleClock);
 
 /* Wallpaper, Win95-style: Fit, Centre, Tile or Stretch over the desktop colour. */
 const WALL_MODES = {
@@ -2346,6 +3297,7 @@ function refreshWindowIcons(){
     explorer: ICONS.folderOpen,
     notepad: ICONS.notepad,
     npp: ICONS.npp,
+    coto: ICONS.coto,
     settings: ICONS.settings,
     help: ICONS.help
   };
@@ -2361,9 +3313,9 @@ function refreshAll(){
   explorers.forEach(x => x.render());
 }
 $("#shellbadge").onclick = () => {
-  const order: MiniOSState["shell"][] = ["powershell","bash","zsh"];
-  state.shell = order[(order.indexOf(state.shell)+1) % 3];
-  save(); applyChrome();
+  const order: MiniOSState["shell"][] = ["powershell","bash","zsh","coto"];
+  state.shell = order[(order.indexOf(state.shell)+1) % order.length];
+  save(); applyChrome(); renderIcons();
 };
 
 document.addEventListener("keydown", e => {

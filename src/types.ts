@@ -1,5 +1,5 @@
 export type Appearance = "win95" | "macos9";
-export type ShellName = "powershell" | "bash" | "zsh";
+export type ShellName = "powershell" | "bash" | "zsh" | "coto";
 export type LinkTarget = "same" | "new";
 export type WallpaperMode = "fit" | "center" | "tile" | "stretch";
 
@@ -32,6 +32,22 @@ export interface Point {
   y: number;
 }
 
+export type CotoAccent = "orbit" | "coral" | "mint";
+
+export interface CotoCapture {
+  id: string;
+  text: string;
+  done: boolean;
+  createdAt: number;
+}
+
+export interface CotoState {
+  accent: CotoAccent;
+  captures: CotoCapture[];
+  sourceName: string;
+  source: string;
+}
+
 export interface MiniOSState {
   version: 2;
   appearance: Appearance;
@@ -51,6 +67,7 @@ export interface MiniOSState {
   npp: EditorDocument;
   notes: Record<string, string>;
   iconPos: Record<string, Point>;
+  coto: CotoState;
   fs: FolderNode;
 }
 
@@ -72,7 +89,9 @@ export type IconName =
   | "win"
   | "recycle"
   | "warn"
-  | "up";
+  | "up"
+  | "coto"
+  | "cotosh";
 
 export type IconSet = Record<IconName, string>;
 

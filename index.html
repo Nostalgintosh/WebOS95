@@ -256,6 +256,13 @@ select{padding:1px}
 .term.ps{background:#012456;color:#f2f2f2}
 .term.bash{background:#0c0c0c;color:#cfcfcf}
 .term.zsh{background:#151515;color:#e6e6e6}
+.term.coto-shell{
+  color:#f4f0ff;background:
+    radial-gradient(circle at 85% 8%,rgba(126,96,239,.24),transparent 34%),
+    linear-gradient(145deg,#171225,#21193a 58%,#15111f);
+}
+.term.coto-shell .scroll{scrollbar-color:#564686 #1b152b}
+.term.coto-shell input.cmd{caret-color:#82e6bc}
 .term .line{white-space:pre-wrap}
 .term .err{color:#ff5f56}
 .term .warn{color:#ffd866}
@@ -278,6 +285,36 @@ select{padding:1px}
   flex:1;min-height:0;resize:none;font-family:var(--mono);font-size:12px;
   padding:3px;line-height:1.4;
 }
+.note-toolbar{
+  display:flex;align-items:center;gap:3px;min-height:30px;padding:3px;
+  border-top:1px solid var(--white);border-bottom:1px solid var(--face-dark);overflow-x:auto;
+}
+.note-toolbar button{min-width:27px;padding:2px 6px;white-space:nowrap}
+.note-toolbar button.strong{font-weight:bold}.note-toolbar button.italic{font-style:italic}.note-toolbar button.strike{text-decoration:line-through}
+.note-toolbar button[aria-pressed="true"]{border-color:var(--black) var(--white) var(--white) var(--black);box-shadow:inset 1px 1px 0 var(--face-dark);background:var(--face-light)}
+.note-toolbar .sep{flex:0 0 2px;width:2px;height:20px;margin:0 2px;border-left:1px solid var(--face-dark);border-right:1px solid var(--white)}
+.note-toolbar .spacer{flex:1 0 10px}
+.note-workspace{flex:1;min-height:0;display:flex;overflow:hidden}
+.note-workspace .note{display:block;width:100%;border:2px solid;border-color:var(--face-dark) var(--white) var(--white) var(--face-dark);box-shadow:inset 1px 1px 0 var(--black)}
+.note-preview{
+  display:none;min-width:0;min-height:0;overflow:auto;padding:14px 16px;color:#171522;background:#fff;
+  font:13px/1.5 Arial,sans-serif;user-select:text;
+}
+.note-workspace.split .note,.note-workspace.split .note-preview{display:block;flex:1 1 50%;width:50%}
+.note-workspace.split .note{border-right-width:1px}
+.note-workspace.split .note-preview{border:2px solid;border-left-width:1px;border-color:var(--face-dark) var(--white) var(--white) var(--face-dark)}
+.note-workspace.preview-only .note{display:none}
+.note-workspace.preview-only .note-preview{display:block;flex:1;width:100%;border:2px solid;border-color:var(--face-dark) var(--white) var(--white) var(--face-dark)}
+.note-preview h1,.note-preview h2,.note-preview h3,.note-preview h4,.note-preview h5,.note-preview h6{margin:.75em 0 .35em;line-height:1.18}
+.note-preview h1{font-size:25px;border-bottom:1px solid #bbb}.note-preview h2{font-size:20px}.note-preview h3{font-size:17px}
+.note-preview p{margin:.45em 0}.note-preview ul,.note-preview ol{margin:.45em 0;padding-left:25px}
+.note-preview blockquote{margin:.6em 0;padding:5px 10px;color:#555;border-left:4px solid #777;background:#f1f1f1}
+.note-preview code{padding:1px 3px;color:#55236d;background:#eee6f2;font-family:var(--mono);font-size:12px}
+.note-preview pre{position:relative;margin:.7em 0;padding:10px;color:#eee;background:#1b1724;border:1px solid #000;white-space:pre-wrap;overflow:auto}
+.note-preview pre>span{float:right;color:#aaa;font:10px var(--mono);text-transform:uppercase}.note-preview pre code{padding:0;color:inherit;background:transparent}
+.note-preview a{color:#0000c0;text-decoration:underline}.note-preview hr{border:0;border-top:1px solid #777}
+.note-preview li.task{list-style:none;margin-left:-20px}.note-preview li.task input{width:auto;height:auto;margin:0 6px 0 0;box-shadow:none}
+.note-preview .empty-preview{color:#777;font-style:italic}
 /* ---------- MiniEditor ---------- */
 .npp-toolbar{display:flex;align-items:center;gap:4px;min-height:31px;padding:4px 3px;border-top:1px solid var(--white);border-bottom:1px solid var(--face-dark);overflow:hidden}
 .npp-toolbar button{min-width:0;padding:2px 7px;white-space:nowrap}
@@ -359,8 +396,8 @@ kbd{
 #tray .shellbadge{font-family:var(--mono);font-size:10px}
 #shellbadge{cursor:pointer;border-right:1px solid var(--face-dark);padding-right:6px}
 #tray-time{display:flex;flex-direction:column;align-items:flex-end;line-height:1.05;min-width:58px}
-#clock{font-variant-numeric:tabular-nums}
-#tray-date{font-size:9px;color:#333}
+#clock{font-variant-numeric:tabular-nums;white-space:nowrap}
+#tray-date{font-size:9px;color:#333;white-space:nowrap}
 /* ---------- start menu ---------- */
 #startmenu{
   position:absolute;left:3px;bottom:34px;width:214px;display:none;z-index:9500;

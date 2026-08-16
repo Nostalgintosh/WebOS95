@@ -28,15 +28,23 @@ function readLegacyState(): Partial<MiniOSState> | null {
 
 function normalizeState(stored: Partial<MiniOSState> | null, defaults: MiniOSState): MiniOSState {
   if (!stored) return defaults;
+  const cotoAccent = stored.coto?.accent;
   return {
     ...defaults,
     ...stored,
     version: 2,
     appearance: stored.appearance === "macos9" ? "macos9" : "win95",
+    shell: stored.shell === "bash" || stored.shell === "zsh" || stored.shell === "coto" ? stored.shell : "powershell",
     fs: stored.fs ?? defaults.fs,
     notes: stored.notes ?? defaults.notes,
     npp: { ...defaults.npp, ...(stored.npp ?? {}) },
     iconPos: stored.iconPos ?? {},
+    coto: {
+      ...defaults.coto,
+      ...(stored.coto ?? {}),
+      accent: cotoAccent === "coral" || cotoAccent === "mint" || cotoAccent === "orbit" ? cotoAccent : defaults.coto.accent,
+      captures: Array.isArray(stored.coto?.captures) ? stored.coto.captures : defaults.coto.captures,
+    },
   };
 }
 
