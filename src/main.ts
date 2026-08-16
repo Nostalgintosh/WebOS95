@@ -2626,7 +2626,7 @@ function openCoto(initialView: CotoView = "home"){
 function openSettings(){
   const ex = wins.find(w => w.kind === "settings");
   if(ex){ focusWin(ex); return; }
-  const w = makeWindow({ title:"Appearance & Shell", icon:ICONS.settings, kind:"settings", w:540, h:520 });
+  const w = makeWindow({ title:activeTheme.menu.settings, icon:ICONS.settings, kind:"settings", w:540, h:520 });
   const box = el("div","fields in");
   box.style.background = "var(--face)";
 

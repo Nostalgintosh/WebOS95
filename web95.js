@@ -492,7 +492,7 @@
       appearance: stored.appearance === "macos9" ? "macos9" : "win95",
       shell: stored.shell === "bash" || stored.shell === "zsh" || stored.shell === "coto" ? stored.shell : "powershell",
       timeZone: typeof stored.timeZone === "string" ? stored.timeZone : defaults.timeZone,
-      timeFormat: stored.timeFormat === "24" ? "24" : "12",
+      timeFormat: stored.timeFormat === "12" || stored.timeFormat === "24" ? stored.timeFormat : defaults.timeFormat,
       fs: stored.fs ?? defaults.fs,
       notes: stored.notes ?? defaults.notes,
       npp: { ...defaults.npp, ...stored.npp ?? {} },
@@ -3845,7 +3845,7 @@ ${lines.join("\n") || "No captured ideas yet."}
         focusWin(ex);
         return;
       }
-      const w = makeWindow({ title: "Appearance & Shell", icon: ICONS.settings, kind: "settings", w: 540, h: 520 });
+      const w = makeWindow({ title: activeTheme.menu.settings, icon: ICONS.settings, kind: "settings", w: 540, h: 520 });
       const box = el("div", "fields in");
       box.style.background = "var(--face)";
       const fsSystem = el("fieldset");

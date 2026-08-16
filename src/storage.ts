@@ -36,7 +36,7 @@ function normalizeState(stored: Partial<MiniOSState> | null, defaults: MiniOSSta
     appearance: stored.appearance === "macos9" ? "macos9" : "win95",
     shell: stored.shell === "bash" || stored.shell === "zsh" || stored.shell === "coto" ? stored.shell : "powershell",
     timeZone: typeof stored.timeZone === "string" ? stored.timeZone : defaults.timeZone,
-    timeFormat: stored.timeFormat === "24" ? "24" : "12",
+    timeFormat: stored.timeFormat === "12" || stored.timeFormat === "24" ? stored.timeFormat : defaults.timeFormat,
     fs: stored.fs ?? defaults.fs,
     notes: stored.notes ?? defaults.notes,
     npp: { ...defaults.npp, ...(stored.npp ?? {}) },
